@@ -282,7 +282,49 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
 
 def render_vendors(recs: pd.DataFrame, data: dict) -> None:
     st.header("Vendors")
-    st.write("_(coming in Task 14)_")
+
+    vendors = data["vendors"]
+    if vendors.empty:
+        st.info("No vendors yet. Add some in Supabase's Table Editor under the `vendors` table.")
+        _supabase_edit_link("vendors")
+        return
+
+    search = st.text_input("Search vendor name", "")
+    filtered = vendors[vendors["name"].str.contains(search, case=False, na=False)] if search else vendors
+
+    # SKUs per vendor for quick context
+    skus_per_vendor = recs.groupby("vendor_id")["sku"].count() if not recs.empty else pd.Series(dtype=int)
+
+    for _, v in filtered.iterrows():
+        sku_count = int(skus_per_vendor.get(v["id"], 0))
+        with st.expander(f"{v['name']}  •  {sku_count} SKUs"):
+            c1, c2 = st.columns(2)
+            c1.markdown(f"**Contact:** {v.get('contact_name') or '—'}  \n"
+                        f"**Email:** {v.get('contact_email') or '—'}  \n"
+                        f"**Phone:** {v.get('contact_phone') or '—'}")
+            c2.markdown(f"**Payment terms:** {v.get('payment_terms') or '—'}  \n"
+                        f"**Currency:** {v.get('currency') or 'USD'}  \n"
+                        f"**Website:** {v.get('website') or '—'}")
+            if v.get("notes"):
+                st.markdown(f"**Notes:** {v['notes']}")
+
+            if sku_count > 0:
+                sku_df = recs[recs["vendor_id"] == v["id"]][["sku", "name", "status", "on_hand", "days_of_supply", "recommended_qty"]]
+                st.dataframe(sku_df, hide_index=True, use_container_width=True)
+
+    st.divider()
+    _supabase_edit_link("vendors")
+
+
+def _supabase_edit_link(table: str) -> None:
+    """Render a button-link that opens the Supabase table editor in a new tab."""
+    project_url = os.environ.get("SUPABASE_URL", "")
+    if not project_url:
+        return
+    # Project URL is like https://abc123.supabase.co — extract the project ref
+    ref = project_url.replace("https://", "").split(".")[0]
+    edit_url = f"https://supabase.com/dashboard/project/{ref}/editor"
+    st.link_button(f"Edit {table} in Supabase →", edit_url)
 
 
 def render_all_products(recs: pd.DataFrame, data: dict) -> None:
