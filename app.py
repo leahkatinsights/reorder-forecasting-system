@@ -27,10 +27,16 @@ st.set_page_config(
 
 
 # ---------- Data loading (cached for session) ----------
+@st.cache_resource
+def _get_supabase_client():
+    """Cached Supabase client. cache_resource handles unpicklable objects like DB connections."""
+    return supabase_io.get_client()
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading data from Shopify and Supabase...")
 def load_all_data() -> dict[str, Any]:
     """Pull everything we need for a dashboard session. Returns a dict of DataFrames + Settings."""
-    client = supabase_io.get_client()
+    client = _get_supabase_client()
     products = supabase_io.fetch_products(client)
     vendors = supabase_io.fetch_vendors(client)
     settings = supabase_io.fetch_settings(client)
@@ -45,7 +51,6 @@ def load_all_data() -> dict[str, Any]:
         "shop_products": shop_products,
         "sales": sales,
         "loaded_at": datetime.now(),
-        "_client": client,
     }
 
 
@@ -141,7 +146,7 @@ recs = build_recommendations(data)
 if not recs.empty:
     rows = recs[["sku", "on_hand", "daily_velocity", "days_of_supply", "status", "recommended_qty"]].to_dict("records")
     try:
-        supabase_io.write_forecast_log(data["_client"], rows)
+        supabase_io.write_forecast_log(_get_supabase_client(), rows)
     except Exception as e:
         st.warning(f"Could not write forecast log: {e}")
 
