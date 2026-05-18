@@ -28,6 +28,27 @@ st.set_page_config(
 LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
 st.logo(LOGO_URL, size="large")
 
+# Override primary button color in the sidebar only (used for active nav item).
+# Keeps the rose primary color for form buttons in the main content area.
+st.markdown(
+    """
+    <style>
+    section[data-testid="stSidebar"] button[kind="primary"] {
+        background-color: #F0F0F0;
+        color: #1E3A5F;
+        border-color: transparent;
+        font-weight: 600;
+    }
+    section[data-testid="stSidebar"] button[kind="primary"]:hover {
+        background-color: #E5E5E5;
+        border-color: transparent;
+        color: #1E3A5F;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # ---------- Data loading (cached for session) ----------
 @st.cache_resource
@@ -154,10 +175,11 @@ if "page" not in st.session_state:
 
 with st.sidebar:
     for label, icon in NAV_ITEMS:
+        is_active = st.session_state.page == label
         if st.button(
             label,
             key=f"nav_{label}",
-            type="secondary",
+            type="primary" if is_active else "secondary",
             icon=icon,
             use_container_width=True,
         ):
