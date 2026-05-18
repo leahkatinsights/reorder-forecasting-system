@@ -33,7 +33,7 @@ st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
@@ -69,10 +69,10 @@ st.markdown(
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
     [data-testid="stMarkdownContainer"] h3 {
-        font-family: 'Anton', 'Inter', sans-serif !important;
-        font-weight: 400 !important;
-        letter-spacing: 0.01em !important;
-        line-height: 1.05 !important;
+        font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+        line-height: 1.1 !important;
         color: #1E3A5F !important;
     }
     h1, [data-testid="stHeading"] h1 { font-size: 46px !important; margin-bottom: 6px !important; }
@@ -698,7 +698,7 @@ def render_vendors(recs: pd.DataFrame, data: dict) -> None:
 
     vendors = data["vendors"]
     if vendors.empty:
-        st.info("No vendors yet. Add some in Supabase's Table Editor under the `vendors` table.")
+        st.info("No vendors yet. Add some under the `vendors` table.")
         _supabase_edit_link("vendors")
         return
 
@@ -737,7 +737,7 @@ def _supabase_edit_link(table: str) -> None:
     # Project URL is like https://abc123.supabase.co — extract the project ref
     ref = project_url.replace("https://", "").split(".")[0]
     edit_url = f"https://supabase.com/dashboard/project/{ref}/editor"
-    st.link_button(f"Edit {table} in Supabase →", edit_url)
+    st.link_button(f"Edit {table} →", edit_url)
 
 
 def render_all_products(recs: pd.DataFrame, data: dict) -> None:
@@ -747,13 +747,47 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
         st.info("No products loaded.")
         return
 
-    # Filters
+    # ---- Status filter cards (single source of truth: ap_status_multi) ----
+    if "ap_status_multi" not in st.session_state:
+        st.session_state.ap_status_multi = []
+
+    total_count = len(recs)
+    now_count = int((recs["status"] == "reorder_now").sum())
+    soon_count = int((recs["status"] == "reorder_soon").sum())
+    healthy_count = int((recs["status"] == "healthy").sum())
+
+    current = st.session_state.ap_status_multi  # list[str]
+    active_card = (
+        "all" if not current
+        else current[0] if len(current) == 1 and current[0] in {"reorder_now", "reorder_soon", "healthy"}
+        else None
+    )
+
+    card_cols = st.columns(4)
+    card_defs = [
+        ("all",          "All",            total_count,   []),
+        ("reorder_now",  "🔴 Reorder Now", now_count,     ["reorder_now"]),
+        ("reorder_soon", "🟡 Reorder Soon", soon_count,   ["reorder_soon"]),
+        ("healthy",      "🟢 Healthy",     healthy_count, ["healthy"]),
+    ]
+    for col, (key, label, count, new_value) in zip(card_cols, card_defs):
+        with col:
+            if st.button(
+                f"{label}\n\n**{count}**",
+                key=f"ap_card_{key}",
+                type="primary" if active_card == key else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state.ap_status_multi = new_value
+                st.rerun()
+
+    # ---- Other filters ----
     c1, c2, c3, c4 = st.columns(4)
     categories = sorted([c for c in recs["category"].dropna().unique()])
     statuses = sorted([s for s in recs["status"].dropna().unique()])
 
     selected_cat = c1.multiselect("Category", categories, default=[])
-    selected_status = c2.multiselect("Status", statuses, default=[])
+    selected_status = c2.multiselect("Status", statuses, key="ap_status_multi")
     selected_vendor_id = c3.selectbox(
         "Vendor",
         options=[None] + (data["vendors"]["id"].tolist() if not data["vendors"].empty else []),
