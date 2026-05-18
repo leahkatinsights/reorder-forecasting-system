@@ -28,6 +28,16 @@ st.set_page_config(
 LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
 st.logo(LOGO_URL, size="large")
 
+# Load Manrope display font for headers
+st.markdown(
+    """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    """,
+    unsafe_allow_html=True,
+)
+
 # Override primary button color in the sidebar only (used for active nav item).
 # Keeps the rose primary color for form buttons in the main content area.
 # Also hides the top-right toolbar and tightens top padding on each page.
@@ -51,39 +61,44 @@ st.markdown(
     /* Reduce top padding so headers sit higher on every page */
     .block-container { padding-top: 1.5rem !important; }
 
-    /* ---- Page headers: big bold display font ---- */
-    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@700;800;900&display=swap');
-
-    .main h1, .main h2, .main h3 {
+    /* ---- Page headers: big bold display font (Manrope) ---- */
+    h1, h2, h3,
+    [data-testid="stHeading"] h1,
+    [data-testid="stHeading"] h2,
+    [data-testid="stHeading"] h3,
+    [data-testid="stMarkdownContainer"] h1,
+    [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3 {
         font-family: 'Manrope', 'Inter', sans-serif !important;
         font-weight: 800 !important;
         letter-spacing: -0.02em !important;
         line-height: 1.1 !important;
         color: #1E3A5F !important;
     }
-    .main h1 { font-size: 44px !important; margin-bottom: 6px !important; }
-    .main h2 { font-size: 34px !important; margin-bottom: 4px !important; }
-    .main h3 { font-size: 22px !important; margin-bottom: 4px !important; font-weight: 700 !important; }
+    h1, [data-testid="stHeading"] h1 { font-size: 46px !important; margin-bottom: 6px !important; }
+    h2, [data-testid="stHeading"] h2 { font-size: 36px !important; margin-bottom: 6px !important; }
+    h3, [data-testid="stHeading"] h3 { font-size: 22px !important; margin-bottom: 4px !important; font-weight: 700 !important; }
 
     /* ---- Reorder Alerts dashboard ---- */
-    .kpi-tile {
-        background: #f6f6f7;
-        border-radius: 10px;
-        padding: 16px 20px;
-        height: 96px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
+    .kpi-row { padding: 4px 0; }
+    .kpi-tile { padding: 6px 0 14px 0; }
+    /* Hairline divider between adjacent KPI tiles inside a row */
+    .main [data-testid="stHorizontalBlock"] > [data-testid="column"]:not(:first-child) .kpi-tile {
+        border-left: 1px solid #ececee;
+        padding-left: 22px;
     }
     .kpi-label {
-        font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
-        text-transform: uppercase; color: #6b6b6b; margin-bottom: 4px;
+        font-size: 10.5px; font-weight: 600; letter-spacing: 0.10em;
+        text-transform: uppercase; color: #8a8a90; margin-bottom: 8px;
     }
     .kpi-value {
-        font-size: 30px; font-weight: 700; color: #111;
-        line-height: 1.1; letter-spacing: -0.01em;
+        font-size: 32px; font-weight: 700; color: #111;
+        line-height: 1; letter-spacing: -0.02em;
     }
-    .kpi-sub { font-size: 12px; color: #6b6b6b; margin-top: 4px; }
+    .kpi-sub { font-size: 12px; color: #8a8a90; margin-top: 6px; }
+    .kpi-section-divider {
+        border: none; border-top: 1px solid #ececee; margin: 18px 0 6px 0;
+    }
 
     .alert-th {
         font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
@@ -407,6 +422,8 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     fc[2].markdown(_kpi_tile("REORDER NEEDED", f"${reorder['total']:,.0f}", reorder_sub), unsafe_allow_html=True)
     fc[3].markdown(_kpi_tile("DEAD STOCK", f"${dead_value:,.0f}", dead_sub), unsafe_allow_html=True)
 
+    st.markdown("<hr class='kpi-section-divider'>", unsafe_allow_html=True)
+
     # ---- Count tiles ----
     now_count = int((recs["status"] == "reorder_now").sum())
     soon_count = int((recs["status"] == "reorder_soon").sum())
@@ -417,7 +434,7 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     cc[1].markdown(_kpi_tile("REORDER SOON", str(soon_count)), unsafe_allow_html=True)
     cc[2].markdown(_kpi_tile("HEALTHY", str(healthy_count)), unsafe_allow_html=True)
 
-    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:32px;'></div>", unsafe_allow_html=True)
 
     # ---- Alerts table ----
     alerts = recs[recs["status"].isin(["reorder_now", "reorder_soon"])].copy()
