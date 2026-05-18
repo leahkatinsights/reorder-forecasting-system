@@ -73,7 +73,7 @@ st.markdown(
         font-weight: 900 !important;
         letter-spacing: -0.025em !important;
         line-height: 1.05 !important;
-        color: #1E3A5F !important;
+        color: #111 !important;
     }
     h1, [data-testid="stHeading"] h1 { font-size: 52px !important; margin-bottom: 6px !important; }
     h2, [data-testid="stHeading"] h2 { font-size: 40px !important; margin-bottom: 6px !important; }
@@ -501,7 +501,7 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         f"""
         <div style="padding-top: 12px;">
             <div style="
-                color: #1E3A5F;
+                color: #111;
                 font-family: 'Inter', sans-serif;
                 font-size: 32px;
                 font-weight: 900;
