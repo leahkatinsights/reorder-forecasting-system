@@ -45,6 +45,7 @@ def load_all_data() -> dict[str, Any]:
         "shop_products": shop_products,
         "sales": sales,
         "loaded_at": datetime.now(),
+        "_client": client,
     }
 
 
@@ -136,6 +137,13 @@ with st.sidebar:
 # ---------- Load + status bar ----------
 data = load_all_data()
 recs = build_recommendations(data)
+
+if not recs.empty:
+    rows = recs[["sku", "on_hand", "daily_velocity", "days_of_supply", "status", "recommended_qty"]].to_dict("records")
+    try:
+        supabase_io.write_forecast_log(data["_client"], rows)
+    except Exception as e:
+        st.warning(f"Could not write forecast log: {e}")
 
 loaded_ago = (datetime.now() - data["loaded_at"]).seconds
 st.caption(
