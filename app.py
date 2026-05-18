@@ -33,7 +33,7 @@ st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
@@ -61,7 +61,7 @@ st.markdown(
     /* Reduce top padding so headers sit higher on every page */
     .block-container { padding-top: 1.5rem !important; }
 
-    /* ---- Page headers: big bold display font (Manrope) ---- */
+    /* ---- Page headers: big bold display font (Inter Black 900) ---- */
     h1, h2, h3,
     [data-testid="stHeading"] h1,
     [data-testid="stHeading"] h2,
@@ -69,15 +69,15 @@ st.markdown(
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
     [data-testid="stMarkdownContainer"] h3 {
-        font-family: 'Space Grotesk', 'Inter', sans-serif !important;
-        font-weight: 700 !important;
-        letter-spacing: -0.02em !important;
-        line-height: 1.1 !important;
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 900 !important;
+        letter-spacing: -0.025em !important;
+        line-height: 1.05 !important;
         color: #1E3A5F !important;
     }
-    h1, [data-testid="stHeading"] h1 { font-size: 46px !important; margin-bottom: 6px !important; }
-    h2, [data-testid="stHeading"] h2 { font-size: 36px !important; margin-bottom: 6px !important; }
-    h3, [data-testid="stHeading"] h3 { font-size: 22px !important; margin-bottom: 4px !important; font-weight: 700 !important; }
+    h1, [data-testid="stHeading"] h1 { font-size: 52px !important; margin-bottom: 6px !important; }
+    h2, [data-testid="stHeading"] h2 { font-size: 40px !important; margin-bottom: 6px !important; }
+    h3, [data-testid="stHeading"] h3 { font-size: 24px !important; margin-bottom: 4px !important; font-weight: 800 !important; }
 
     /* ---- Reorder Alerts dashboard ---- */
     .kpi-row { padding: 4px 0; }
@@ -481,10 +481,16 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         .tolist()
     )
     name_by_sku = recs.set_index("sku")["name"].to_dict()
+
+    requested_sku = st.session_state.pop("fd_selected_sku", None)
+    if requested_sku in sku_options:
+        st.session_state.fd_sku_picker = requested_sku
+
     sku = st.selectbox(
         "Pick a SKU",
         sku_options,
         format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+        key="fd_sku_picker",
     )
     row = recs[recs["sku"] == sku].iloc[0]
 
@@ -496,9 +502,11 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         <div style="padding-top: 12px;">
             <div style="
                 color: #1E3A5F;
-                font-size: 28px;
-                font-weight: 700;
-                line-height: 1.25;
+                font-family: 'Inter', sans-serif;
+                font-size: 32px;
+                font-weight: 900;
+                letter-spacing: -0.025em;
+                line-height: 1.1;
                 margin: 0 0 6px 0;
             ">{row['name']}</div>
             <div style="
@@ -756,26 +764,18 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     soon_count = int((recs["status"] == "reorder_soon").sum())
     healthy_count = int((recs["status"] == "healthy").sum())
 
-    current = st.session_state.ap_status_multi  # list[str]
-    active_card = (
-        "all" if not current
-        else current[0] if len(current) == 1 and current[0] in {"reorder_now", "reorder_soon", "healthy"}
-        else None
-    )
-
     card_cols = st.columns(4)
     card_defs = [
-        ("all",          "All",            total_count,   []),
-        ("reorder_now",  "🔴 Reorder Now", now_count,     ["reorder_now"]),
-        ("reorder_soon", "🟡 Reorder Soon", soon_count,   ["reorder_soon"]),
-        ("healthy",      "🟢 Healthy",     healthy_count, ["healthy"]),
+        ("all",          "All",          total_count,   []),
+        ("reorder_now",  "Reorder Now",  now_count,     ["reorder_now"]),
+        ("reorder_soon", "Reorder Soon", soon_count,    ["reorder_soon"]),
+        ("healthy",      "Healthy",      healthy_count, ["healthy"]),
     ]
     for col, (key, label, count, new_value) in zip(card_cols, card_defs):
         with col:
             if st.button(
-                f"{label}\n\n**{count}**",
+                f"**{label}**\n\n{count}",
                 key=f"ap_card_{key}",
-                type="primary" if active_card == key else "secondary",
                 use_container_width=True,
             ):
                 st.session_state.ap_status_multi = new_value
@@ -815,15 +815,25 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     if "days_of_supply" in display.columns:
         display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
 
-    st.caption(f"Showing {len(display)} of {len(recs)} SKUs")
-    st.dataframe(
+    st.caption(f"Showing {len(display)} of {len(recs)} SKUs · Click a row to open its forecast detail.")
+    event = st.dataframe(
         display,
         hide_index=True,
         use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row",
         column_config={
             "image_url": st.column_config.ImageColumn("", width="small"),
         },
     )
+
+    selected_rows = event.selection.rows if event and event.selection else []
+    if selected_rows:
+        idx = selected_rows[0]
+        sku = display.iloc[idx]["sku"]
+        st.session_state.fd_selected_sku = sku
+        st.session_state.page = "Forecast Detail"
+        st.rerun()
 
     _supabase_edit_link("products")
 
