@@ -33,7 +33,7 @@ st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
@@ -69,10 +69,10 @@ st.markdown(
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
     [data-testid="stMarkdownContainer"] h3 {
-        font-family: 'Manrope', 'Inter', sans-serif !important;
-        font-weight: 800 !important;
-        letter-spacing: -0.02em !important;
-        line-height: 1.1 !important;
+        font-family: 'Archivo Black', 'Inter', sans-serif !important;
+        font-weight: 900 !important;
+        letter-spacing: -0.01em !important;
+        line-height: 1.05 !important;
         color: #1E3A5F !important;
     }
     h1, [data-testid="stHeading"] h1 { font-size: 46px !important; margin-bottom: 6px !important; }
