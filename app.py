@@ -146,7 +146,59 @@ st.caption(
 # ---------- Page routing ----------
 def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     st.header("Reorder Alerts")
-    st.write("_(coming in Task 12)_")
+
+    if recs.empty:
+        st.info("No products loaded yet. Run `seed_products.py` first.")
+        return
+
+    alerts = recs[recs["status"].isin(["reorder_now", "reorder_soon"])].copy()
+    alerts = alerts.sort_values(
+        by=["status", "days_of_supply"],
+        ascending=[True, True],  # reorder_now < reorder_soon alphabetically -> good
+    )
+
+    now_count = (alerts["status"] == "reorder_now").sum()
+    soon_count = (alerts["status"] == "reorder_soon").sum()
+
+    c1, c2 = st.columns(2)
+    c1.metric("🔴 Reorder now", int(now_count))
+    c2.metric("🟡 Reorder soon", int(soon_count))
+
+    st.divider()
+
+    if alerts.empty:
+        st.success("Nothing needs reordering. Inventory looks healthy.")
+        return
+
+    vendors = data["vendors"].set_index("id") if not data["vendors"].empty else None
+
+    for _, r in alerts.iterrows():
+        icon = "🔴" if r["status"] == "reorder_now" else "🟡"
+        label = "Reorder now" if r["status"] == "reorder_now" else "Reorder soon"
+
+        vendor_name = None
+        if vendors is not None and pd.notna(r["vendor_id"]) and r["vendor_id"] in vendors.index:
+            v = vendors.loc[r["vendor_id"]]
+            vendor_name = v["name"]
+
+        with st.container(border=False):
+            top = st.columns([1, 6, 3])
+            top[0].markdown(f"### {icon}")
+            top[1].markdown(f"**{r['sku']}**  \n{r['name']}")
+            top[2].markdown(f"**{label}**")
+
+            mid = st.columns(4)
+            mid[0].metric("On hand", r["on_hand"])
+            mid[1].metric("Velocity (units/day)", f"{r['daily_velocity']:.2f}")
+            mid[2].metric("Days of supply", f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞")
+            mid[3].metric("Recommended qty", r["recommended_qty"])
+
+            cost = r.get("recommended_cost")
+            cost_str = f"${cost:,.2f}" if pd.notna(cost) else "—"
+            vendor_str = vendor_name or "_no vendor set_"
+            st.markdown(f"💰 Est. cost: **{cost_str}**  •  🏷️ Vendor: **{vendor_str}**")
+
+            st.divider()
 
 
 def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
