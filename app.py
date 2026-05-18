@@ -25,6 +25,9 @@ st.set_page_config(
     layout="wide",
 )
 
+LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
+st.logo(LOGO_URL, size="large")
+
 
 # ---------- Data loading (cached for session) ----------
 @st.cache_resource
@@ -139,7 +142,6 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 PAGES = ["Reorder Alerts", "Forecast Detail", "Vendors", "All Products"]
 
 with st.sidebar:
-    st.markdown("## 📦 Lumati Repurchase")
     page = st.radio("Page", PAGES, label_visibility="collapsed")
     st.divider()
     if st.button("🔄 Refresh data"):
