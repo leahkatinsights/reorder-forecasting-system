@@ -33,7 +33,7 @@ st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
@@ -69,9 +69,9 @@ st.markdown(
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
     [data-testid="stMarkdownContainer"] h3 {
-        font-family: 'Archivo Black', 'Inter', sans-serif !important;
-        font-weight: 900 !important;
-        letter-spacing: -0.01em !important;
+        font-family: 'Anton', 'Inter', sans-serif !important;
+        font-weight: 400 !important;
+        letter-spacing: 0.01em !important;
         line-height: 1.05 !important;
         color: #1E3A5F !important;
     }
@@ -150,7 +150,7 @@ def _get_supabase_client():
     return supabase_io.get_client()
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading data from Shopify and Supabase...")
+@st.cache_data(ttl=3600, show_spinner="Loading data...")
 def load_all_data() -> dict[str, Any]:
     """Pull everything we need for a dashboard session. Returns a dict of DataFrames + Settings."""
     client = _get_supabase_client()
