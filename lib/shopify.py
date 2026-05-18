@@ -16,10 +16,6 @@ import requests
 
 API_VERSION = "2025-01"
 
-# Location names we track separately. Match against Shopify location names case-insensitively.
-LOCATION_CLINIC = "613 Westlake Street"
-LOCATION_WSA = "WSA Distributing"
-
 
 def _api_base() -> str:
     domain = os.environ["SHOPIFY_STORE_DOMAIN"]
@@ -84,23 +80,15 @@ def _next_page_url(link_header: str) -> str | None:
     return None
 
 
-def fetch_locations() -> dict[int, str]:
-    """Return {location_id: location_name} for all locations in the store."""
-    resp = _get("/locations.json")
-    return {loc["id"]: loc["name"] for loc in resp.json().get("locations", [])}
-
-
 def fetch_products() -> pd.DataFrame:
     """Return all active product variants as a DataFrame.
 
     Columns: sku, variant_id, product_id, product_name, variant_title, inventory_item_id,
              on_hand_clinic, on_hand_wsa, on_hand (= clinic + wsa, used by reorder math)
     """
-    # Resolve target location IDs by name (case-insensitive)
-    locations = fetch_locations()
-    name_to_id = {name.strip().lower(): loc_id for loc_id, name in locations.items()}
-    clinic_id = name_to_id.get(LOCATION_CLINIC.lower())
-    wsa_id = name_to_id.get(LOCATION_WSA.lower())
+    # Location IDs come from env (avoids needing read_locations scope on the Shopify token)
+    clinic_id = int(os.environ["SHOPIFY_LOCATION_CLINIC"])
+    wsa_id = int(os.environ["SHOPIFY_LOCATION_WSA"])
 
     rows: list[dict[str, Any]] = []
     inventory_item_ids: list[int] = []
