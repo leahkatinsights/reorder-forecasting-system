@@ -154,11 +154,10 @@ if "page" not in st.session_state:
 
 with st.sidebar:
     for label, icon in NAV_ITEMS:
-        is_active = st.session_state.page == label
         if st.button(
             label,
             key=f"nav_{label}",
-            type="primary" if is_active else "secondary",
+            type="secondary",
             icon=icon,
             use_container_width=True,
         ):
