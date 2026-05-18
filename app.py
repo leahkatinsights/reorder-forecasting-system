@@ -54,6 +54,19 @@ st.markdown(
     /* Reduce top padding so headers sit higher on every page */
     .block-container { padding-top: 1.5rem !important; }
 
+    /* ---- Page headers: big bold display font ---- */
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&display=swap');
+
+    .main h1, .main h2 {
+        font-family: 'Plus Jakarta Sans', 'Inter', sans-serif !important;
+        font-weight: 800 !important;
+        letter-spacing: -0.02em !important;
+        line-height: 1.1 !important;
+        color: #1E3A5F !important;
+    }
+    .main h1 { font-size: 44px !important; margin-bottom: 6px !important; }
+    .main h2 { font-size: 34px !important; margin-bottom: 4px !important; }
+
     /* ---- Reorder Alerts dashboard ---- */
     .kpi-tile { padding: 4px 0 12px 0; }
     .kpi-label {
@@ -270,6 +283,94 @@ st.caption(
 
 
 # ---------- Page routing ----------
+_ROW_COL_WIDTHS = [1.3, 4.4, 1.3, 1.3, 1.3, 0.7]
+
+
+def _kpi_tile(label: str, value: str, subline: str | None = None) -> str:
+    sub = f"<div class='kpi-sub'>{subline}</div>" if subline else ""
+    return (
+        f"<div class='kpi-tile'>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"{sub}"
+        f"</div>"
+    )
+
+
+def _product_cell_html(r: pd.Series) -> str:
+    img_url = r.get("image_url") or ""
+    if img_url:
+        img_html = (
+            f"<img src='{img_url}' "
+            f"style='width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;'/>"
+        )
+    else:
+        img_html = (
+            "<div style='width:40px;height:40px;border-radius:4px;"
+            "background:#f2f2f2;flex-shrink:0;'></div>"
+        )
+    return (
+        f"<div style='display:flex;gap:12px;align-items:center;'>"
+        f"{img_html}"
+        f"<div>"
+        f"<div class='alert-sku'>{r['sku']}</div>"
+        f"<div class='alert-name'>{r['name']}</div>"
+        f"</div>"
+        f"</div>"
+    )
+
+
+def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
+    is_now = r["status"] == "reorder_now"
+    dot_class = "alert-dot-now" if is_now else "alert-dot-soon"
+    label_class = "alert-status-now" if is_now else "alert-status-soon"
+    label = "Now" if is_now else "Soon"
+
+    days = r["days_of_supply"]
+    days_str = f"{days:.1f} d" if pd.notna(days) else "∞"
+
+    is_expanded = st.session_state.get(expanded_key, False)
+    chevron = "▾" if is_expanded else "▸"
+
+    cols = st.columns(_ROW_COL_WIDTHS, vertical_alignment="center")
+    cols[0].markdown(
+        f"<div class='alert-status'>"
+        f"<span class='alert-dot {dot_class}'></span>"
+        f"<span class='{label_class}'>{label}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    cols[1].markdown(_product_cell_html(r), unsafe_allow_html=True)
+    cols[2].markdown(f"<div class='alert-cell'>{int(r['on_hand'])}</div>", unsafe_allow_html=True)
+    cols[3].markdown(f"<div class='alert-cell'>{days_str}</div>", unsafe_allow_html=True)
+    cols[4].markdown(f"<div class='alert-cell'>{int(r['recommended_qty'])}</div>", unsafe_allow_html=True)
+    if cols[5].button(chevron, key=f"toggle_{r['sku']}", type="tertiary"):
+        st.session_state[expanded_key] = not is_expanded
+        st.rerun()
+
+    if is_expanded:
+        vendor_name = None
+        if vendors is not None and pd.notna(r["vendor_id"]) and r["vendor_id"] in vendors.index:
+            vendor_name = vendors.loc[r["vendor_id"], "name"]
+        vendor_str = vendor_name or "—"
+        cost = r.get("recommended_cost")
+        cost_str = f"${cost:,.2f}" if pd.notna(cost) else "—"
+        velocity = r["daily_velocity"]
+        velocity_str = f"{velocity:.2f}" if pd.notna(velocity) else "—"
+
+        detail_cols = st.columns(_ROW_COL_WIDTHS)
+        detail_cols[1].markdown(
+            f"<div class='alert-detail'>"
+            f"Clinic {int(r['on_hand_clinic'])}  ·  WSA {int(r['on_hand_wsa'])}<br>"
+            f"Velocity {velocity_str} units/day<br>"
+            f"Est. cost {cost_str}  ·  Vendor: {vendor_str}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<hr class='alert-row-divider'>", unsafe_allow_html=True)
+
+
 def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     st.header("Reorder Alerts")
 
@@ -277,57 +378,54 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
         st.info("No products loaded yet. Run `seed_products.py` first.")
         return
 
+    # ---- Financial KPI tiles ----
+    inv_value, inv_excluded = finance.inventory_value(recs)
+    po_value = finance.open_po_value(data.get("purchase_log", pd.DataFrame()))
+    reorder = finance.reorder_needed(recs)
+    dead_value, dead_count = finance.dead_stock_value(recs)
+
+    inv_sub = f"{inv_excluded} excluded — no cost" if inv_excluded else None
+    reorder_sub = f"Now ${reorder['now']:,.0f} · Soon ${reorder['soon']:,.0f}"
+    dead_sub = f"{dead_count} SKUs" if dead_count else None
+
+    fc = st.columns(4)
+    fc[0].markdown(_kpi_tile("INVENTORY ON HAND", f"${inv_value:,.0f}", inv_sub), unsafe_allow_html=True)
+    fc[1].markdown(_kpi_tile("OPEN POs", f"${po_value:,.0f}"), unsafe_allow_html=True)
+    fc[2].markdown(_kpi_tile("REORDER NEEDED", f"${reorder['total']:,.0f}", reorder_sub), unsafe_allow_html=True)
+    fc[3].markdown(_kpi_tile("DEAD STOCK", f"${dead_value:,.0f}", dead_sub), unsafe_allow_html=True)
+
+    # ---- Count tiles ----
+    now_count = int((recs["status"] == "reorder_now").sum())
+    soon_count = int((recs["status"] == "reorder_soon").sum())
+    healthy_count = int((recs["status"] == "healthy").sum())
+
+    cc = st.columns(3)
+    cc[0].markdown(_kpi_tile("REORDER NOW", str(now_count)), unsafe_allow_html=True)
+    cc[1].markdown(_kpi_tile("REORDER SOON", str(soon_count)), unsafe_allow_html=True)
+    cc[2].markdown(_kpi_tile("HEALTHY", str(healthy_count)), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+
+    # ---- Alerts table ----
     alerts = recs[recs["status"].isin(["reorder_now", "reorder_soon"])].copy()
-    alerts = alerts.sort_values(
-        by=["status", "days_of_supply"],
-        ascending=[True, True],  # reorder_now < reorder_soon alphabetically -> good
-    )
-
-    now_count = (alerts["status"] == "reorder_now").sum()
-    soon_count = (alerts["status"] == "reorder_soon").sum()
-
-    c1, c2 = st.columns(2)
-    c1.metric("🔴 Reorder now", int(now_count))
-    c2.metric("🟡 Reorder soon", int(soon_count))
-
-    st.divider()
+    alerts = alerts.sort_values(by=["status", "days_of_supply"], ascending=[True, True])
 
     if alerts.empty:
         st.success("Nothing needs reordering. Inventory looks healthy.")
         return
 
+    header_cols = st.columns(_ROW_COL_WIDTHS)
+    header_cols[0].markdown("<div class='alert-th'>STATUS</div>", unsafe_allow_html=True)
+    header_cols[1].markdown("<div class='alert-th'>SKU</div>", unsafe_allow_html=True)
+    header_cols[2].markdown("<div class='alert-th alert-th-right'>ON HAND</div>", unsafe_allow_html=True)
+    header_cols[3].markdown("<div class='alert-th alert-th-right'>DAYS LEFT</div>", unsafe_allow_html=True)
+    header_cols[4].markdown("<div class='alert-th alert-th-right'>REC QTY</div>", unsafe_allow_html=True)
+    st.markdown("<hr class='alert-row-divider'>", unsafe_allow_html=True)
+
     vendors = data["vendors"].set_index("id") if not data["vendors"].empty else None
 
     for _, r in alerts.iterrows():
-        icon = "🔴" if r["status"] == "reorder_now" else "🟡"
-        label = "Reorder now" if r["status"] == "reorder_now" else "Reorder soon"
-
-        vendor_name = None
-        if vendors is not None and pd.notna(r["vendor_id"]) and r["vendor_id"] in vendors.index:
-            v = vendors.loc[r["vendor_id"]]
-            vendor_name = v["name"]
-
-        with st.container(border=False):
-            top = st.columns([1, 1, 5, 2])
-            top[0].markdown(f"### {icon}")
-            if r.get("image_url"):
-                top[1].image(r["image_url"], width=70)
-            top[2].markdown(f"**{r['sku']}**  \n{r['name']}")
-            top[3].markdown(f"**{label}**")
-
-            mid = st.columns(5)
-            mid[0].metric("Clinic", r["on_hand_clinic"])
-            mid[1].metric("WSA", r["on_hand_wsa"])
-            mid[2].metric("Velocity (units/day)", f"{r['daily_velocity']:.2f}")
-            mid[3].metric("Days of supply", f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞")
-            mid[4].metric("Recommended qty", r["recommended_qty"])
-
-            cost = r.get("recommended_cost")
-            cost_str = f"${cost:,.2f}" if pd.notna(cost) else "—"
-            vendor_str = vendor_name or "_no vendor set_"
-            st.markdown(f"💰 Est. cost: **{cost_str}**  •  🏷️ Vendor: **{vendor_str}**")
-
-            st.divider()
+        _render_alert_row(r, vendors, expanded_key=f"alert_expanded_{r['sku']}")
 
 
 def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
