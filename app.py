@@ -139,12 +139,13 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 
 
 # ---------- Sidebar nav ----------
+# Material Symbols render as black outlined icons by default.
 NAV_ITEMS = [
-    ("Reorder Alerts",  "🚨"),
-    ("Forecast Detail", "📈"),
-    ("Purchase Log",    "📋"),
-    ("Vendors",         "🤝"),
-    ("All Products",    "📦"),
+    ("Reorder Alerts",  ":material/notifications_active:"),
+    ("Forecast Detail", ":material/trending_up:"),
+    ("Purchase Log",    ":material/receipt_long:"),
+    ("Vendors",         ":material/store:"),
+    ("All Products",    ":material/inventory_2:"),
 ]
 PAGES = [label for label, _ in NAV_ITEMS]
 
@@ -155,15 +156,16 @@ with st.sidebar:
     for label, icon in NAV_ITEMS:
         is_active = st.session_state.page == label
         if st.button(
-            f"{icon}  {label}",
+            label,
             key=f"nav_{label}",
-            type="primary" if is_active else "tertiary",
+            type="primary" if is_active else "secondary",
+            icon=icon,
             use_container_width=True,
         ):
             st.session_state.page = label
             st.rerun()
     st.divider()
-    if st.button("🔄 Refresh data", use_container_width=True):
+    if st.button("Refresh data", icon=":material/refresh:", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
