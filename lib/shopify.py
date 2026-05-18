@@ -16,6 +16,10 @@ import requests
 
 API_VERSION = "2025-01"
 
+# Location names we track separately. Match against Shopify location names case-insensitively.
+LOCATION_CLINIC = "613 Westlake Street"
+LOCATION_WSA = "WSA Distributing"
+
 
 def _api_base() -> str:
     domain = os.environ["SHOPIFY_STORE_DOMAIN"]
@@ -80,11 +84,24 @@ def _next_page_url(link_header: str) -> str | None:
     return None
 
 
+def fetch_locations() -> dict[int, str]:
+    """Return {location_id: location_name} for all locations in the store."""
+    resp = _get("/locations.json")
+    return {loc["id"]: loc["name"] for loc in resp.json().get("locations", [])}
+
+
 def fetch_products() -> pd.DataFrame:
     """Return all active product variants as a DataFrame.
 
-    Columns: sku, variant_id, product_id, product_name, variant_title, inventory_item_id, on_hand
+    Columns: sku, variant_id, product_id, product_name, variant_title, inventory_item_id,
+             on_hand_clinic, on_hand_wsa, on_hand (= clinic + wsa, used by reorder math)
     """
+    # Resolve target location IDs by name (case-insensitive)
+    locations = fetch_locations()
+    name_to_id = {name.strip().lower(): loc_id for loc_id, name in locations.items()}
+    clinic_id = name_to_id.get(LOCATION_CLINIC.lower())
+    wsa_id = name_to_id.get(LOCATION_WSA.lower())
+
     rows: list[dict[str, Any]] = []
     inventory_item_ids: list[int] = []
 
@@ -106,20 +123,30 @@ def fetch_products() -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     if df.empty:
+        df["on_hand_clinic"] = pd.Series(dtype=int)
+        df["on_hand_wsa"] = pd.Series(dtype=int)
         df["on_hand"] = pd.Series(dtype=int)
         return df
 
-    # Inventory levels (chunked — Shopify caps inventory_item_ids per request at 50)
-    on_hand_map: dict[int, int] = {}
+    # Inventory levels, partitioned by location (chunked — Shopify caps at 50 ids per request)
+    on_hand_clinic: dict[int, int] = {}
+    on_hand_wsa: dict[int, int] = {}
     for chunk_start in range(0, len(inventory_item_ids), 50):
         chunk = inventory_item_ids[chunk_start:chunk_start + 50]
         ids_param = ",".join(str(i) for i in chunk)
         resp = _get("/inventory_levels.json", params={"inventory_item_ids": ids_param, "limit": 250})
         for level in resp.json().get("inventory_levels", []):
             item_id = level["inventory_item_id"]
-            on_hand_map[item_id] = on_hand_map.get(item_id, 0) + (level.get("available") or 0)
+            loc_id = level["location_id"]
+            avail = level.get("available") or 0
+            if loc_id == clinic_id:
+                on_hand_clinic[item_id] = on_hand_clinic.get(item_id, 0) + avail
+            elif loc_id == wsa_id:
+                on_hand_wsa[item_id] = on_hand_wsa.get(item_id, 0) + avail
 
-    df["on_hand"] = df["inventory_item_id"].map(on_hand_map).fillna(0).astype(int)
+    df["on_hand_clinic"] = df["inventory_item_id"].map(on_hand_clinic).fillna(0).astype(int)
+    df["on_hand_wsa"] = df["inventory_item_id"].map(on_hand_wsa).fillna(0).astype(int)
+    df["on_hand"] = df["on_hand_clinic"] + df["on_hand_wsa"]
     return df
 
 

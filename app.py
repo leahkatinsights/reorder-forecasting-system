@@ -74,10 +74,16 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
     if products.empty or shop.empty:
         return pd.DataFrame()
 
+    # Filter to active products only (defaults true if column missing)
+    if "active" in products.columns:
+        products = products[products["active"].fillna(True).astype(bool)]
+        if products.empty:
+            return pd.DataFrame()
+
     today = datetime.now().date()
 
     merged = products.merge(
-        shop[["sku", "on_hand", "product_name"]],
+        shop[["sku", "on_hand", "on_hand_clinic", "on_hand_wsa", "product_name"]],
         on="sku",
         how="inner",
     )
@@ -113,6 +119,8 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
             "unit_cost": float(p["unit_cost"]) if p.get("unit_cost") is not None else None,
             "moq": int(p.get("moq") or 1),
             "on_hand": rec.on_hand,
+            "on_hand_clinic": int(p["on_hand_clinic"]),
+            "on_hand_wsa": int(p["on_hand_wsa"]),
             "daily_velocity": rec.daily_velocity,
             "days_of_supply": rec.days_of_supply,
             "status": rec.status,
@@ -201,11 +209,12 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
             top[1].markdown(f"**{r['sku']}**  \n{r['name']}")
             top[2].markdown(f"**{label}**")
 
-            mid = st.columns(4)
-            mid[0].metric("On hand", r["on_hand"])
-            mid[1].metric("Velocity (units/day)", f"{r['daily_velocity']:.2f}")
-            mid[2].metric("Days of supply", f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞")
-            mid[3].metric("Recommended qty", r["recommended_qty"])
+            mid = st.columns(5)
+            mid[0].metric("Clinic", r["on_hand_clinic"])
+            mid[1].metric("WSA", r["on_hand_wsa"])
+            mid[2].metric("Velocity (units/day)", f"{r['daily_velocity']:.2f}")
+            mid[3].metric("Days of supply", f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞")
+            mid[4].metric("Recommended qty", r["recommended_qty"])
 
             cost = r.get("recommended_cost")
             cost_str = f"${cost:,.2f}" if pd.notna(cost) else "—"
@@ -237,14 +246,22 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         .sort_values(["_o", "sku"])["sku"]
         .tolist()
     )
-    sku = st.selectbox("Pick a SKU", sku_options)
+    name_by_sku = recs.set_index("sku")["name"].to_dict()
+    sku = st.selectbox(
+        "Pick a SKU",
+        sku_options,
+        format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+    )
     row = recs[recs["sku"] == sku].iloc[0]
 
-    c = st.columns(4)
+    st.subheader(f"{row['sku']} — {row['name']}")
+
+    c = st.columns(5)
     c[0].metric("Status", row["status"])
-    c[1].metric("On hand", row["on_hand"])
-    c[2].metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
-    c[3].metric(
+    c[1].metric("Clinic", row["on_hand_clinic"])
+    c[2].metric("WSA", row["on_hand_wsa"])
+    c[3].metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
+    c[4].metric(
         "Days of supply",
         f"{row['days_of_supply']:.1f}" if row["days_of_supply"] is not None else "∞",
     )
@@ -322,7 +339,7 @@ def render_vendors(recs: pd.DataFrame, data: dict) -> None:
                 st.markdown(f"**Notes:** {v['notes']}")
 
             if sku_count > 0:
-                sku_df = recs[recs["vendor_id"] == v["id"]][["sku", "name", "status", "on_hand", "days_of_supply", "recommended_qty"]]
+                sku_df = recs[recs["vendor_id"] == v["id"]][["sku", "name", "status", "on_hand_clinic", "on_hand_wsa", "days_of_supply", "recommended_qty"]]
                 st.dataframe(sku_df, hide_index=True, use_container_width=True)
 
     st.divider()
@@ -373,7 +390,7 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
         mask = filtered["sku"].str.contains(search, case=False, na=False) | filtered["name"].str.contains(search, case=False, na=False)
         filtered = filtered[mask]
 
-    display_cols = ["sku", "name", "category", "status", "on_hand", "daily_velocity", "days_of_supply", "moq", "recommended_qty"]
+    display_cols = ["sku", "name", "category", "status", "on_hand_clinic", "on_hand_wsa", "daily_velocity", "days_of_supply", "moq", "recommended_qty"]
     display = filtered[display_cols].copy()
     display["daily_velocity"] = display["daily_velocity"].round(2)
     display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
