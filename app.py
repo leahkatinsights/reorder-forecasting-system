@@ -302,15 +302,46 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
 
     st.subheader(f"{row['sku']} — {row['name']}")
 
-    c = st.columns(5)
-    c[0].metric("Status", row["status"])
-    c[1].metric("Clinic", row["on_hand_clinic"])
-    c[2].metric("WSA", row["on_hand_wsa"])
-    c[3].metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
-    c[4].metric(
-        "Days of supply",
-        f"{row['days_of_supply']:.1f}" if row["days_of_supply"] is not None else "∞",
+    # ---- Status banner ----
+    STATUS_DISPLAY = {
+        "reorder_now":          ("Reorder Now",                  "#FCE4E4", "#8A2A2A"),
+        "reorder_soon":         ("Reorder Soon",                 "#FFF3D6", "#7A5A0E"),
+        "healthy":              ("Healthy",                      "#E4F4E4", "#1F5A2A"),
+        "slow":                 ("Slow Mover",                   "#F0F0F0", "#444444"),
+        "dead":                 ("Inactive — No Recent Sales",   "#F0F0F0", "#444444"),
+        "insufficient_history": ("New SKU — Limited History",    "#F0F0F0", "#444444"),
+        "manual_override":      ("Manual Override",              "#F0F0F0", "#444444"),
+    }
+    label, bg, fg = STATUS_DISPLAY.get(row["status"], (row["status"], "#F0F0F0", "#444444"))
+    st.markdown(
+        f"""<div style="
+            background-color: {bg};
+            color: {fg};
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin: 8px 0 20px 0;
+            font-size: 16px;
+            font-weight: 600;
+        ">{label}</div>""",
+        unsafe_allow_html=True,
     )
+
+    # ---- Inventory ----
+    st.markdown("##### Inventory")
+    i1, i2, i3 = st.columns(3)
+    i1.metric("Clinic (613 Westlake)", int(row["on_hand_clinic"]))
+    i2.metric("WSA Distributing", int(row["on_hand_wsa"]))
+    i3.metric("Total on hand", int(row["on_hand_clinic"]) + int(row["on_hand_wsa"]))
+
+    st.markdown("")
+
+    # ---- Sales forecast ----
+    st.markdown("##### Sales Forecast")
+    f1, f2, f3 = st.columns(3)
+    f1.metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
+    dos = row["days_of_supply"]
+    f2.metric("Days of supply", f"{dos:.1f}" if dos is not None else "∞")
+    f3.metric("Recommended order qty", int(row["recommended_qty"]))
 
     st.divider()
     st.subheader("Sales history (last 90 days) + forecast projection (next 60 days)")
