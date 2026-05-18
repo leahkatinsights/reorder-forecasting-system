@@ -139,14 +139,35 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 
 
 # ---------- Sidebar nav ----------
-PAGES = ["Reorder Alerts", "Forecast Detail", "Purchase Log", "Vendors", "All Products"]
+NAV_ITEMS = [
+    ("Reorder Alerts",  "🚨"),
+    ("Forecast Detail", "📈"),
+    ("Purchase Log",    "📋"),
+    ("Vendors",         "🤝"),
+    ("All Products",    "📦"),
+]
+PAGES = [label for label, _ in NAV_ITEMS]
+
+if "page" not in st.session_state:
+    st.session_state.page = "Reorder Alerts"
 
 with st.sidebar:
-    page = st.radio("Page", PAGES, label_visibility="collapsed")
+    for label, icon in NAV_ITEMS:
+        is_active = st.session_state.page == label
+        if st.button(
+            f"{icon}  {label}",
+            key=f"nav_{label}",
+            type="primary" if is_active else "tertiary",
+            use_container_width=True,
+        ):
+            st.session_state.page = label
+            st.rerun()
     st.divider()
-    if st.button("🔄 Refresh data"):
+    if st.button("🔄 Refresh data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+
+page = st.session_state.page
 
 
 # ---------- Load + status bar ----------
