@@ -363,7 +363,27 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     header_cols = st.columns([1, 5])
     if row.get("image_url"):
         header_cols[0].image(row["image_url"], width=140)
-    header_cols[1].subheader(f"{row['sku']} — {row['name']}")
+    header_cols[1].markdown(
+        f"""
+        <div style="padding-top: 12px;">
+            <div style="
+                color: #1E3A5F;
+                font-size: 28px;
+                font-weight: 700;
+                line-height: 1.25;
+                margin: 0 0 6px 0;
+            ">{row['name']}</div>
+            <div style="
+                color: #8A8A8A;
+                font-size: 12px;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+            ">SKU&nbsp;·&nbsp;{row['sku']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # ---- Status banner ----
     STATUS_DISPLAY = {
