@@ -449,7 +449,7 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     header_cols[1].markdown("<div class='alert-th'>SKU</div>", unsafe_allow_html=True)
     header_cols[2].markdown("<div class='alert-th alert-th-right'>ON HAND</div>", unsafe_allow_html=True)
     header_cols[3].markdown("<div class='alert-th alert-th-right'>DAYS LEFT</div>", unsafe_allow_html=True)
-    header_cols[4].markdown("<div class='alert-th alert-th-right'>REC QTY</div>", unsafe_allow_html=True)
+    header_cols[4].markdown("<div class='alert-th alert-th-right'>NEED</div>", unsafe_allow_html=True)
     st.markdown("<hr class='alert-row-divider'>", unsafe_allow_html=True)
 
     vendors = data["vendors"].set_index("id") if not data["vendors"].empty else None
@@ -815,25 +815,117 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     if "days_of_supply" in display.columns:
         display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
 
-    st.caption(f"Showing {len(display)} of {len(recs)} SKUs · Click a row to open its forecast detail.")
+    st.caption(f"Showing {len(display)} of {len(recs)} SKUs · Check rows on the left to bulk-create a purchase order.")
     event = st.dataframe(
         display,
         hide_index=True,
         use_container_width=True,
         on_select="rerun",
-        selection_mode="single-row",
+        selection_mode="multi-row",
         column_config={
             "image_url": st.column_config.ImageColumn("", width="small"),
         },
     )
 
     selected_rows = event.selection.rows if event and event.selection else []
+
     if selected_rows:
-        idx = selected_rows[0]
-        sku = display.iloc[idx]["sku"]
-        st.session_state.fd_selected_sku = sku
-        st.session_state.page = "Forecast Detail"
-        st.rerun()
+        selected_skus_df = filtered.iloc[selected_rows].copy()
+        n = len(selected_skus_df)
+
+        st.divider()
+        bar = st.columns([4, 1])
+        bar[0].markdown(f"### {n} SKU{'s' if n != 1 else ''} selected")
+        if n == 1:
+            if bar[1].button("View forecast →", key="view_one_btn", use_container_width=True):
+                st.session_state.fd_selected_sku = str(selected_skus_df.iloc[0]["sku"])
+                st.session_state.page = "Forecast Detail"
+                st.rerun()
+
+        with st.expander(f"📋 Create purchase order for these {n} SKU{'s' if n != 1 else ''}", expanded=True):
+            with st.form(f"bulk_po_form_{n}"):
+                dc1, dc2 = st.columns(2)
+                ordered_at = dc1.date_input("Date ordered", value=datetime.now().date(), key="bulk_po_date")
+                expected_arrival = dc2.date_input("Expected arrival (optional)", value=None, key="bulk_po_arrival")
+
+                vendors_df = data["vendors"]
+                vendor_name_by_id = vendors_df.set_index("id")["name"].to_dict() if not vendors_df.empty else {}
+                unique_vendors = selected_skus_df["vendor_id"].dropna().unique().tolist()
+                if len(unique_vendors) > 1:
+                    st.info(f"Selected SKUs span {len(unique_vendors)} vendors — each line uses its own vendor.")
+                elif len(unique_vendors) == 0:
+                    st.warning("None of the selected SKUs have a vendor set. The PO will be logged with no vendor attached.")
+
+                st.markdown("**Line items**")
+                st.caption("Quantity defaults to recommended qty; unit cost defaults to the value in products.")
+
+                line_items = []
+                for _, sku_row in selected_skus_df.iterrows():
+                    sku_val = sku_row["sku"]
+                    cols = st.columns([3, 2, 1, 1])
+                    cols[0].markdown(
+                        f"**{sku_val}**  \n<span style='color:#666;font-size:13px;'>{sku_row['name']}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    vid = sku_row.get("vendor_id")
+                    vname = vendor_name_by_id.get(vid, "(none)") if pd.notna(vid) else "(none)"
+                    cols[1].markdown(
+                        f"<span style='color:#666;font-size:13px;'>{vname}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                    default_qty = int(sku_row.get("recommended_qty") or 1) or 1
+                    qty = cols[2].number_input(
+                        "Qty",
+                        min_value=1,
+                        value=default_qty,
+                        key=f"bulk_qty_{sku_val}",
+                        label_visibility="collapsed",
+                    )
+                    default_cost = float(sku_row["unit_cost"]) if pd.notna(sku_row.get("unit_cost")) else 0.0
+                    unit_cost = cols[3].number_input(
+                        "Cost",
+                        min_value=0.0,
+                        value=default_cost,
+                        step=0.01,
+                        key=f"bulk_cost_{sku_val}",
+                        label_visibility="collapsed",
+                    )
+                    line_items.append({
+                        "sku": sku_val,
+                        "vendor_id": vid if pd.notna(vid) else None,
+                        "quantity": qty,
+                        "unit_cost": unit_cost,
+                    })
+
+                notes = st.text_area("Notes (optional, applied to all rows)", "", key="bulk_po_notes")
+                submitted = st.form_submit_button("Log purchase order", type="primary")
+
+                if submitted:
+                    client = _get_supabase_client()
+                    inserted = 0
+                    errors = []
+                    for item in line_items:
+                        try:
+                            supabase_io.insert_purchase_log(
+                                client,
+                                ordered_at=ordered_at.isoformat(),
+                                sku=item["sku"],
+                                vendor_id=item["vendor_id"],
+                                quantity=int(item["quantity"]),
+                                unit_cost=item["unit_cost"] if item["unit_cost"] > 0 else None,
+                                expected_arrival=expected_arrival.isoformat() if expected_arrival else None,
+                                notes=notes if notes.strip() else None,
+                            )
+                            inserted += 1
+                        except Exception as e:
+                            errors.append(f"{item['sku']}: {e}")
+                    if errors:
+                        for err in errors:
+                            st.error(err)
+                    if inserted:
+                        st.success(f"Logged {inserted} purchase order line(s) — visible in Purchase Log.")
+                        st.rerun()
 
     _supabase_edit_link("products")
 
