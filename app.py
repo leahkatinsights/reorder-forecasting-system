@@ -26,10 +26,7 @@ st.set_page_config(
 )
 
 LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
-# Logo links back to the app root. Hard reload resets session_state, which sends the
-# user back to the default page (Reorder Alerts — see PAGES[0] below).
-APP_URL = os.environ.get("APP_URL", "http://localhost:8501")
-st.logo(LOGO_URL, size="large", link=APP_URL)
+st.logo(LOGO_URL, size="large")
 
 # Override primary button color in the sidebar only (used for active nav item).
 # Keeps the rose primary color for form buttons in the main content area.
@@ -69,12 +66,23 @@ st.markdown(
     .main h3 { font-size: 22px !important; margin-bottom: 4px !important; font-weight: 700 !important; }
 
     /* ---- Reorder Alerts dashboard ---- */
-    .kpi-tile { padding: 4px 0 12px 0; }
-    .kpi-label {
-        font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
-        text-transform: uppercase; color: #6b6b6b; margin-bottom: 6px;
+    .kpi-tile {
+        background: #f6f6f7;
+        border-radius: 10px;
+        padding: 16px 20px;
+        height: 96px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
-    .kpi-value { font-size: 30px; font-weight: 600; color: #111; line-height: 1.1; }
+    .kpi-label {
+        font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
+        text-transform: uppercase; color: #6b6b6b; margin-bottom: 4px;
+    }
+    .kpi-value {
+        font-size: 30px; font-weight: 700; color: #111;
+        line-height: 1.1; letter-spacing: -0.01em;
+    }
     .kpi-sub { font-size: 12px; color: #6b6b6b; margin-top: 4px; }
 
     .alert-th {
