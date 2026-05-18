@@ -94,10 +94,13 @@ def fetch_products() -> pd.DataFrame:
     inventory_item_ids: list[int] = []
 
     for product in _paginate("/products.json", params={"limit": 250, "status": "active"}):
+        product_image_url = (product.get("image") or {}).get("src") or ""
+        images_by_id = {img["id"]: img.get("src", "") for img in product.get("images", [])}
         for v in product.get("variants", []):
             sku = (v.get("sku") or "").strip()
             if not sku:
                 continue
+            variant_image_url = images_by_id.get(v.get("image_id")) or product_image_url
             rows.append({
                 "sku": sku,
                 "variant_id": v["id"],
@@ -105,6 +108,7 @@ def fetch_products() -> pd.DataFrame:
                 "product_name": product["title"],
                 "variant_title": v.get("title", ""),
                 "inventory_item_id": v.get("inventory_item_id"),
+                "image_url": variant_image_url,
             })
             if v.get("inventory_item_id"):
                 inventory_item_ids.append(v["inventory_item_id"])

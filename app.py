@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from lib import shopify, supabase_io  # noqa: E402
+from lib import finance, shopify, supabase_io  # noqa: E402
 from lib.forecast import calculate_velocity, history_metadata  # noqa: E402
 from lib.reorder import ReorderRecommendation, Settings, compute_recommendation  # noqa: E402
 
@@ -26,7 +26,10 @@ st.set_page_config(
 )
 
 LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
-st.logo(LOGO_URL, size="large")
+# Logo links back to the app root. Hard reload resets session_state, which sends the
+# user back to the default page (Reorder Alerts — see PAGES[0] below).
+APP_URL = os.environ.get("APP_URL", "http://localhost:8501")
+st.logo(LOGO_URL, size="large", link=APP_URL)
 
 # Override primary button color in the sidebar only (used for active nav item).
 # Keeps the rose primary color for form buttons in the main content area.
@@ -50,6 +53,49 @@ st.markdown(
     #MainMenu, [data-testid="stToolbar"], [data-testid="stDecoration"] { visibility: hidden; height: 0; }
     /* Reduce top padding so headers sit higher on every page */
     .block-container { padding-top: 1.5rem !important; }
+
+    /* ---- Reorder Alerts dashboard ---- */
+    .kpi-tile { padding: 4px 0 12px 0; }
+    .kpi-label {
+        font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #6b6b6b; margin-bottom: 6px;
+    }
+    .kpi-value { font-size: 30px; font-weight: 600; color: #111; line-height: 1.1; }
+    .kpi-sub { font-size: 12px; color: #6b6b6b; margin-top: 4px; }
+
+    .alert-th {
+        font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #6b6b6b; padding: 6px 0;
+    }
+    .alert-th-right { text-align: right; }
+    .alert-row-divider {
+        border: none; border-top: 1px solid #e5e5e5; margin: 0;
+    }
+
+    .alert-status { font-size: 14px; color: #111; padding-top: 8px; }
+    .alert-dot {
+        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        margin-right: 8px; vertical-align: middle;
+    }
+    .alert-dot-now  { background: #111; }
+    .alert-dot-soon { background: transparent; border: 1.5px solid #111; }
+    .alert-status-now  { font-weight: 600; color: #111; }
+    .alert-status-soon { font-weight: 400; color: #6b6b6b; }
+
+    .alert-sku  { font-size: 14px; font-weight: 600; color: #111; padding-top: 6px; }
+    .alert-name { font-size: 12px; color: #6b6b6b; margin-top: 2px; }
+    .alert-cell { font-size: 14px; color: #111; padding-top: 8px; text-align: right; }
+
+    .alert-detail {
+        font-size: 13px; color: #555; padding: 6px 0 10px 0;
+        margin-left: 0; line-height: 1.6;
+    }
+
+    /* Make the chevron toggle button look like a quiet text link */
+    div[data-testid="column"] button[kind="tertiary"] {
+        padding: 4px 8px; min-height: 0; color: #6b6b6b; font-size: 16px;
+    }
+    div[data-testid="column"] button[kind="tertiary"]:hover { color: #111; background: transparent; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -70,6 +116,7 @@ def load_all_data() -> dict[str, Any]:
     products = supabase_io.fetch_products(client)
     vendors = supabase_io.fetch_vendors(client)
     settings = supabase_io.fetch_settings(client)
+    purchase_log = supabase_io.fetch_purchase_log(client)
 
     shop_products = shopify.fetch_products()      # sku, product_name, on_hand, ...
     sales = shopify.fetch_daily_sales(days_back=settings_window(settings))
@@ -78,6 +125,7 @@ def load_all_data() -> dict[str, Any]:
         "products": products,
         "vendors": vendors,
         "settings": settings,
+        "purchase_log": purchase_log,
         "shop_products": shop_products,
         "sales": sales,
         "loaded_at": datetime.now(),
@@ -112,8 +160,11 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 
     today = datetime.now().date()
 
+    merge_cols = ["sku", "on_hand", "on_hand_clinic", "on_hand_wsa", "product_name"]
+    if "image_url" in shop.columns:
+        merge_cols.append("image_url")
     merged = products.merge(
-        shop[["sku", "on_hand", "on_hand_clinic", "on_hand_wsa", "product_name"]],
+        shop[merge_cols],
         on="sku",
         how="inner",
     )
@@ -148,6 +199,7 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
             "vendor_id": p.get("vendor_id"),
             "unit_cost": float(p["unit_cost"]) if p.get("unit_cost") is not None else None,
             "moq": int(p.get("moq") or 1),
+            "image_url": p.get("image_url") or "",
             "on_hand": rec.on_hand,
             "on_hand_clinic": int(p["on_hand_clinic"]),
             "on_hand_wsa": int(p["on_hand_wsa"]),
@@ -256,10 +308,12 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
             vendor_name = v["name"]
 
         with st.container(border=False):
-            top = st.columns([1, 6, 3])
+            top = st.columns([1, 1, 5, 2])
             top[0].markdown(f"### {icon}")
-            top[1].markdown(f"**{r['sku']}**  \n{r['name']}")
-            top[2].markdown(f"**{label}**")
+            if r.get("image_url"):
+                top[1].image(r["image_url"], width=70)
+            top[2].markdown(f"**{r['sku']}**  \n{r['name']}")
+            top[3].markdown(f"**{label}**")
 
             mid = st.columns(5)
             mid[0].metric("Clinic", r["on_hand_clinic"])
@@ -306,7 +360,10 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     )
     row = recs[recs["sku"] == sku].iloc[0]
 
-    st.subheader(f"{row['sku']} — {row['name']}")
+    header_cols = st.columns([1, 5])
+    if row.get("image_url"):
+        header_cols[0].image(row["image_url"], width=140)
+    header_cols[1].subheader(f"{row['sku']} — {row['name']}")
 
     # ---- Status banner ----
     STATUS_DISPLAY = {
@@ -565,13 +622,23 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
         mask = filtered["sku"].str.contains(search, case=False, na=False) | filtered["name"].str.contains(search, case=False, na=False)
         filtered = filtered[mask]
 
-    display_cols = ["sku", "name", "category", "status", "on_hand_clinic", "on_hand_wsa", "daily_velocity", "days_of_supply", "moq", "recommended_qty"]
+    display_cols = ["image_url", "sku", "name", "category", "status", "on_hand_clinic", "on_hand_wsa", "daily_velocity", "days_of_supply", "moq", "recommended_qty"]
+    display_cols = [c for c in display_cols if c in filtered.columns]
     display = filtered[display_cols].copy()
-    display["daily_velocity"] = display["daily_velocity"].round(2)
-    display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
+    if "daily_velocity" in display.columns:
+        display["daily_velocity"] = display["daily_velocity"].round(2)
+    if "days_of_supply" in display.columns:
+        display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
 
     st.caption(f"Showing {len(display)} of {len(recs)} SKUs")
-    st.dataframe(display, hide_index=True, use_container_width=True)
+    st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "image_url": st.column_config.ImageColumn("", width="small"),
+        },
+    )
 
     _supabase_edit_link("products")
 
