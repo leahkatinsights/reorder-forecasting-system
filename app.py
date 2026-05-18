@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -203,7 +204,80 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
 
 def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     st.header("Forecast Detail")
-    st.write("_(coming in Task 13)_")
+
+    if recs.empty:
+        st.info("No products to inspect.")
+        return
+
+    # Sort SKUs by status urgency then alphabetically for the picker
+    status_order = {
+        "reorder_now": 0,
+        "reorder_soon": 1,
+        "healthy": 2,
+        "slow": 3,
+        "insufficient_history": 4,
+        "dead": 5,
+        "manual_override": 6,
+    }
+    sku_options = (
+        recs.assign(_o=recs["status"].map(status_order).fillna(99))
+        .sort_values(["_o", "sku"])["sku"]
+        .tolist()
+    )
+    sku = st.selectbox("Pick a SKU", sku_options)
+    row = recs[recs["sku"] == sku].iloc[0]
+
+    c = st.columns(4)
+    c[0].metric("Status", row["status"])
+    c[1].metric("On hand", row["on_hand"])
+    c[2].metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
+    c[3].metric(
+        "Days of supply",
+        f"{row['days_of_supply']:.1f}" if row["days_of_supply"] is not None else "∞",
+    )
+
+    st.divider()
+    st.subheader("Sales history (last 90 days) + forecast projection (next 60 days)")
+
+    series = shopify.daily_sales_for_sku(data["sales"], sku, days_back=90)
+    actual_df = pd.DataFrame({"date": series.index, "units": series.values, "kind": "actual"})
+
+    # Project flat at current velocity. The model is a velocity model, not a daily-detail forecast.
+    future_dates = pd.date_range(start=series.index[-1] + pd.Timedelta(days=1), periods=60, freq="D")
+    forecast_df = pd.DataFrame(
+        {"date": future_dates, "units": row["daily_velocity"], "kind": "forecast"}
+    )
+
+    combined = pd.concat([actual_df, forecast_df], ignore_index=True)
+
+    chart = (
+        alt.Chart(combined)
+        .mark_line()
+        .encode(
+            x="date:T",
+            y="units:Q",
+            color=alt.Color(
+                "kind:N",
+                scale=alt.Scale(domain=["actual", "forecast"], range=["#1E3A5F", "#D4829A"]),
+            ),
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+    st.divider()
+    with st.expander("Math breakdown"):
+        dos = row["days_of_supply"]
+        dos_str = f"{dos:.1f}" if dos is not None else "infinite"
+        st.markdown(
+            f"""
+- Forecast window: last **90 days**
+- Weights: linear ramp from **0.5** (oldest) to **1.5** (most recent)
+- Final velocity: **{row['daily_velocity']:.3f} units/day**
+- Days of supply = on_hand ({row['on_hand']}) / velocity ({row['daily_velocity']:.3f}) = **{dos_str}**
+- Recommended qty = max(MOQ, target_cover_days × velocity) = **{row['recommended_qty']} units**
+            """
+        )
 
 
 def render_vendors(recs: pd.DataFrame, data: dict) -> None:
