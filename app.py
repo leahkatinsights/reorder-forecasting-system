@@ -30,9 +30,11 @@ st.logo(LOGO_URL, size="large")
 
 # Override primary button color in the sidebar only (used for active nav item).
 # Keeps the rose primary color for form buttons in the main content area.
+# Also hides the top-right toolbar and tightens top padding on each page.
 st.markdown(
     """
     <style>
+    /* Sidebar nav active state: subtle grey */
     section[data-testid="stSidebar"] button[kind="primary"] {
         background-color: #F0F0F0;
         color: #1E3A5F;
@@ -44,6 +46,10 @@ st.markdown(
         border-color: transparent;
         color: #1E3A5F;
     }
+    /* Hide Streamlit's default top-right menu + deploy button */
+    #MainMenu, [data-testid="stToolbar"], [data-testid="stDecoration"] { visibility: hidden; height: 0; }
+    /* Reduce top padding so headers sit higher on every page */
+    .block-container { padding-top: 1.5rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
