@@ -55,10 +55,10 @@ st.markdown(
     .block-container { padding-top: 1.5rem !important; }
 
     /* ---- Page headers: big bold display font ---- */
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@700;800;900&display=swap');
 
-    .main h1, .main h2 {
-        font-family: 'Plus Jakarta Sans', 'Inter', sans-serif !important;
+    .main h1, .main h2, .main h3 {
+        font-family: 'Manrope', 'Inter', sans-serif !important;
         font-weight: 800 !important;
         letter-spacing: -0.02em !important;
         line-height: 1.1 !important;
@@ -66,6 +66,7 @@ st.markdown(
     }
     .main h1 { font-size: 44px !important; margin-bottom: 6px !important; }
     .main h2 { font-size: 34px !important; margin-bottom: 4px !important; }
+    .main h3 { font-size: 22px !important; margin-bottom: 4px !important; font-weight: 700 !important; }
 
     /* ---- Reorder Alerts dashboard ---- */
     .kpi-tile { padding: 4px 0 12px 0; }
@@ -104,11 +105,15 @@ st.markdown(
         margin-left: 0; line-height: 1.6;
     }
 
-    /* Make the chevron toggle button look like a quiet text link */
-    div[data-testid="column"] button[kind="tertiary"] {
-        padding: 4px 8px; min-height: 0; color: #6b6b6b; font-size: 16px;
+    /* Quiet the chevron toggle button in alert rows */
+    .main div[data-testid="column"]:last-child button[kind="secondary"] {
+        background: transparent !important; border: none !important;
+        color: #6b6b6b !important; padding: 2px 6px !important;
+        min-height: 0 !important; font-size: 16px !important; box-shadow: none !important;
     }
-    div[data-testid="column"] button[kind="tertiary"]:hover { color: #111; background: transparent; }
+    .main div[data-testid="column"]:last-child button[kind="secondary"]:hover {
+        color: #111 !important; background: transparent !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -344,7 +349,7 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
     cols[2].markdown(f"<div class='alert-cell'>{int(r['on_hand'])}</div>", unsafe_allow_html=True)
     cols[3].markdown(f"<div class='alert-cell'>{days_str}</div>", unsafe_allow_html=True)
     cols[4].markdown(f"<div class='alert-cell'>{int(r['recommended_qty'])}</div>", unsafe_allow_html=True)
-    if cols[5].button(chevron, key=f"toggle_{r['sku']}", type="tertiary"):
+    if cols[5].button(chevron, key=f"toggle_{r['sku']}", type="secondary"):
         st.session_state[expanded_key] = not is_expanded
         st.rerun()
 
@@ -507,22 +512,25 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         unsafe_allow_html=True,
     )
 
-    # ---- Inventory ----
-    st.markdown("##### Inventory")
-    i1, i2, i3 = st.columns(3)
-    i1.metric("Clinic (613 Westlake)", int(row["on_hand_clinic"]))
-    i2.metric("WSA Distributing", int(row["on_hand_wsa"]))
-    i3.metric("Total on hand", int(row["on_hand_clinic"]) + int(row["on_hand_wsa"]))
+    # ---- Two-column layout: Inventory | Sales Forecast ----
+    inv_col, fc_col = st.columns(2, gap="medium")
 
-    st.markdown("")
+    with inv_col:
+        with st.container(border=True):
+            st.markdown("##### Available Inventory")
+            i1, i2, i3 = st.columns(3)
+            i1.metric("Clinic", int(row["on_hand_clinic"]))
+            i2.metric("WSA", int(row["on_hand_wsa"]))
+            i3.metric("Total", int(row["on_hand_clinic"]) + int(row["on_hand_wsa"]))
 
-    # ---- Sales forecast ----
-    st.markdown("##### Sales Forecast")
-    f1, f2, f3 = st.columns(3)
-    f1.metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
-    dos = row["days_of_supply"]
-    f2.metric("Days of supply", f"{dos:.1f}" if dos is not None else "∞")
-    f3.metric("Recommended order qty", int(row["recommended_qty"]))
+    with fc_col:
+        with st.container(border=True):
+            st.markdown("##### Forecast Metrics")
+            f1, f2, f3 = st.columns(3)
+            f1.metric("Velocity (units/day)", f"{row['daily_velocity']:.2f}")
+            dos = row["days_of_supply"]
+            f2.metric("Days of supply", f"{dos:.1f}" if dos is not None else "∞")
+            f3.metric("Recommended qty", int(row["recommended_qty"]))
 
     st.divider()
     st.subheader("Sales history (last 90 days) + forecast projection (next 60 days)")
