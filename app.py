@@ -329,7 +329,46 @@ def _supabase_edit_link(table: str) -> None:
 
 def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     st.header("All Products")
-    st.write("_(coming in Task 15)_")
+
+    if recs.empty:
+        st.info("No products loaded.")
+        return
+
+    # Filters
+    c1, c2, c3, c4 = st.columns(4)
+    categories = sorted([c for c in recs["category"].dropna().unique()])
+    statuses = sorted([s for s in recs["status"].dropna().unique()])
+
+    selected_cat = c1.multiselect("Category", categories, default=[])
+    selected_status = c2.multiselect("Status", statuses, default=[])
+    selected_vendor_id = c3.selectbox(
+        "Vendor",
+        options=[None] + (data["vendors"]["id"].tolist() if not data["vendors"].empty else []),
+        format_func=lambda x: "All vendors" if x is None else
+            (data["vendors"].set_index("id").loc[x, "name"] if not data["vendors"].empty else x),
+    )
+    search = c4.text_input("Search SKU or name", "")
+
+    filtered = recs.copy()
+    if selected_cat:
+        filtered = filtered[filtered["category"].isin(selected_cat)]
+    if selected_status:
+        filtered = filtered[filtered["status"].isin(selected_status)]
+    if selected_vendor_id is not None:
+        filtered = filtered[filtered["vendor_id"] == selected_vendor_id]
+    if search:
+        mask = filtered["sku"].str.contains(search, case=False, na=False) | filtered["name"].str.contains(search, case=False, na=False)
+        filtered = filtered[mask]
+
+    display_cols = ["sku", "name", "category", "status", "on_hand", "daily_velocity", "days_of_supply", "moq", "recommended_qty"]
+    display = filtered[display_cols].copy()
+    display["daily_velocity"] = display["daily_velocity"].round(2)
+    display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
+
+    st.caption(f"Showing {len(display)} of {len(recs)} SKUs")
+    st.dataframe(display, hide_index=True, use_container_width=True)
+
+    _supabase_edit_link("products")
 
 
 if page == "Reorder Alerts":
