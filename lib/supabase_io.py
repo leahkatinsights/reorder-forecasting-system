@@ -66,20 +66,24 @@ def write_forecast_log(client: Client, rows: list[dict]) -> None:
     """Append a batch of forecast log rows.
 
     Each row: {sku, on_hand, daily_velocity, days_of_supply, status, recommended_qty}.
-    `days_of_supply` may be None (represents infinity); inserted as NULL.
+    `days_of_supply` may be None/NaN (represents infinity); inserted as NULL.
     """
     if not rows:
         return
+
+    def _num_or_none(v):
+        return None if pd.isna(v) else float(v)
+
     enriched = []
     now = datetime.now(timezone.utc).isoformat()
     for r in rows:
         enriched.append({
             "run_at": now,
             "sku": r["sku"],
-            "on_hand": r["on_hand"],
-            "daily_velocity": float(r["daily_velocity"]),
-            "days_of_supply": float(r["days_of_supply"]) if r["days_of_supply"] is not None else None,
+            "on_hand": int(r["on_hand"]) if not pd.isna(r["on_hand"]) else 0,
+            "daily_velocity": _num_or_none(r["daily_velocity"]) or 0.0,
+            "days_of_supply": _num_or_none(r["days_of_supply"]),
             "status": r["status"],
-            "recommended_qty": r["recommended_qty"],
+            "recommended_qty": int(r["recommended_qty"]) if not pd.isna(r["recommended_qty"]) else 0,
         })
     client.table("forecast_log").insert(enriched).execute()
