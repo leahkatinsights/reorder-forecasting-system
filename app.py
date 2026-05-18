@@ -139,7 +139,7 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 
 
 # ---------- Sidebar nav ----------
-PAGES = ["Reorder Alerts", "Forecast Detail", "Vendors", "All Products"]
+PAGES = ["Reorder Alerts", "Forecast Detail", "Purchase Log", "Vendors", "All Products"]
 
 with st.sidebar:
     page = st.radio("Page", PAGES, label_visibility="collapsed")
@@ -312,6 +312,98 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         )
 
 
+def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
+    st.header("Purchase Log")
+
+    if recs.empty:
+        st.info("No products loaded yet.")
+        return
+
+    # Add new purchase form
+    with st.expander("➕ Log a new purchase", expanded=False):
+        with st.form("new_purchase", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            ordered_at = c1.date_input("Date ordered", value=datetime.now().date())
+            expected_arrival = c2.date_input("Expected arrival (optional)", value=None)
+
+            sku_options = recs.sort_values("sku")["sku"].tolist()
+            name_by_sku = recs.set_index("sku")["name"].to_dict()
+            sku = st.selectbox(
+                "SKU",
+                sku_options,
+                format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+            )
+
+            vendor_options = [None] + (data["vendors"]["id"].tolist() if not data["vendors"].empty else [])
+            vendor_name_by_id = (
+                data["vendors"].set_index("id")["name"].to_dict() if not data["vendors"].empty else {}
+            )
+            vendor_id = st.selectbox(
+                "Vendor",
+                vendor_options,
+                format_func=lambda v: "(none)" if v is None else vendor_name_by_id.get(v, str(v)),
+            )
+
+            c3, c4 = st.columns(2)
+            quantity = c3.number_input("Quantity", min_value=1, value=1, step=1)
+            unit_cost = c4.number_input("Unit cost ($) — optional", min_value=0.0, value=0.0, step=0.01)
+            notes = st.text_area("Notes (optional)", "")
+
+            submitted = st.form_submit_button("Log purchase", type="primary")
+            if submitted:
+                try:
+                    supabase_io.insert_purchase_log(
+                        _get_supabase_client(),
+                        ordered_at=ordered_at.isoformat(),
+                        sku=sku,
+                        vendor_id=vendor_id,
+                        quantity=int(quantity),
+                        unit_cost=unit_cost if unit_cost > 0 else None,
+                        expected_arrival=expected_arrival.isoformat() if expected_arrival else None,
+                        notes=notes if notes.strip() else None,
+                    )
+                    st.success(f"Logged: {sku} × {int(quantity)}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not save: {e}")
+
+    st.divider()
+    st.subheader("History")
+
+    log = supabase_io.fetch_purchase_log(_get_supabase_client())
+    if log.empty:
+        st.info("No purchases logged yet. Use the form above to add one.")
+        return
+
+    # Filters
+    fc1, fc2 = st.columns(2)
+    status_filter = fc1.multiselect("Status", sorted(log["status"].dropna().unique()), default=[])
+    sku_search = fc2.text_input("Filter by SKU", "")
+    if status_filter:
+        log = log[log["status"].isin(status_filter)]
+    if sku_search:
+        log = log[log["sku"].str.contains(sku_search, case=False, na=False)]
+
+    # Join readable names
+    vmap = data["vendors"].set_index("id")["name"].to_dict() if not data["vendors"].empty else {}
+    log["vendor"] = log["vendor_id"].map(vmap).fillna("—")
+    nmap = recs.set_index("sku")["name"].to_dict()
+    log["product"] = log["sku"].map(nmap).fillna("—")
+
+    display_cols = [
+        "ordered_at", "sku", "product", "vendor",
+        "quantity", "unit_cost", "expected_arrival", "status", "notes",
+    ]
+    display = log[display_cols].copy()
+    display["unit_cost"] = display["unit_cost"].apply(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
+    display["expected_arrival"] = display["expected_arrival"].fillna("—")
+    display["notes"] = display["notes"].fillna("—")
+    st.dataframe(display, hide_index=True, use_container_width=True)
+
+    st.caption(f"{len(display)} entries shown")
+    _supabase_edit_link("purchase_log")
+
+
 def render_vendors(recs: pd.DataFrame, data: dict) -> None:
     st.header("Vendors")
 
@@ -407,6 +499,8 @@ if page == "Reorder Alerts":
     render_reorder_alerts(recs, data)
 elif page == "Forecast Detail":
     render_forecast_detail(recs, data)
+elif page == "Purchase Log":
+    render_purchase_log(recs, data)
 elif page == "Vendors":
     render_vendors(recs, data)
 elif page == "All Products":

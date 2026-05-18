@@ -62,3 +62,20 @@ create table if not exists settings (
 
 insert into settings (id) values (1)
 on conflict (id) do nothing;
+
+create table if not exists purchase_log (
+  id                bigserial primary key,
+  ordered_at        date not null default current_date,
+  sku               text references products(sku) on delete set null,
+  vendor_id         uuid references vendors(id) on delete set null,
+  quantity          integer not null check (quantity > 0),
+  unit_cost         numeric(10,2),
+  expected_arrival  date,
+  status            text not null default 'placed',  -- placed | shipped | received | cancelled
+  notes             text,
+  created_at        timestamptz default now()
+);
+
+create index if not exists purchase_log_ordered_at_idx on purchase_log (ordered_at desc);
+create index if not exists purchase_log_sku_idx on purchase_log (sku);
+create index if not exists purchase_log_status_idx on purchase_log (status);

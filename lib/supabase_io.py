@@ -62,6 +62,50 @@ def insert_product(client: Client, sku: str, name: str, category: str | None = N
     ).execute()
 
 
+def fetch_purchase_log(client: Client) -> pd.DataFrame:
+    """Return all purchase_log rows, most recent first."""
+    resp = client.table("purchase_log").select("*").order("ordered_at", desc=True).order("id", desc=True).execute()
+    df = pd.DataFrame(resp.data)
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "id", "ordered_at", "sku", "vendor_id", "quantity",
+            "unit_cost", "expected_arrival", "status", "notes", "created_at",
+        ])
+    return df
+
+
+def insert_purchase_log(
+    client: Client,
+    ordered_at: str,
+    sku: str,
+    vendor_id: str | None,
+    quantity: int,
+    unit_cost: float | None,
+    expected_arrival: str | None,
+    notes: str | None,
+    status: str = "placed",
+) -> None:
+    """Insert a single purchase log row."""
+    payload = {
+        "ordered_at": ordered_at,
+        "sku": sku,
+        "vendor_id": vendor_id,
+        "quantity": int(quantity),
+        "status": status,
+    }
+    if unit_cost is not None:
+        payload["unit_cost"] = float(unit_cost)
+    if expected_arrival:
+        payload["expected_arrival"] = expected_arrival
+    if notes:
+        payload["notes"] = notes
+    client.table("purchase_log").insert(payload).execute()
+
+
+def update_purchase_log_status(client: Client, row_id: int, status: str) -> None:
+    client.table("purchase_log").update({"status": status}).eq("id", row_id).execute()
+
+
 def write_forecast_log(client: Client, rows: list[dict]) -> None:
     """Append a batch of forecast log rows.
 
