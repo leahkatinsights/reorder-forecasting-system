@@ -261,16 +261,16 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 # ---------- Sidebar nav ----------
 # Material Symbols render as black outlined icons by default.
 NAV_ITEMS = [
-    ("Reorder Alerts",  ":material/notifications_active:"),
-    ("Forecast Detail", ":material/trending_up:"),
-    ("Purchase Log",    ":material/receipt_long:"),
-    ("Vendors",         ":material/store:"),
-    ("All Products",    ":material/inventory_2:"),
+    ("Reorder Dashboard", ":material/notifications_active:"),
+    ("All Products",      ":material/inventory_2:"),
+    ("Forecast Detail",   ":material/trending_up:"),
+    ("Purchase Log",      ":material/receipt_long:"),
+    ("Vendors",           ":material/store:"),
 ]
 PAGES = [label for label, _ in NAV_ITEMS]
 
 if "page" not in st.session_state:
-    st.session_state.page = "Reorder Alerts"
+    st.session_state.page = "Reorder Dashboard"
 
 with st.sidebar:
     for label, icon in NAV_ITEMS:
@@ -400,7 +400,7 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
 
 
 def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
-    st.header("Reorder Alerts")
+    st.header("Reorder Dashboard")
 
     if recs.empty:
         st.info("No products loaded yet. Run `seed_products.py` first.")
@@ -425,14 +425,16 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     st.markdown("<hr class='kpi-section-divider'>", unsafe_allow_html=True)
 
     # ---- Count tiles ----
+    total_count = len(recs)
     now_count = int((recs["status"] == "reorder_now").sum())
     soon_count = int((recs["status"] == "reorder_soon").sum())
     healthy_count = int((recs["status"] == "healthy").sum())
 
-    cc = st.columns(3)
-    cc[0].markdown(_kpi_tile("REORDER NOW", str(now_count)), unsafe_allow_html=True)
-    cc[1].markdown(_kpi_tile("REORDER SOON", str(soon_count)), unsafe_allow_html=True)
-    cc[2].markdown(_kpi_tile("HEALTHY", str(healthy_count)), unsafe_allow_html=True)
+    cc = st.columns(4)
+    cc[0].markdown(_kpi_tile("TOTAL SKUS", str(total_count)), unsafe_allow_html=True)
+    cc[1].markdown(_kpi_tile("REORDER NOW", str(now_count)), unsafe_allow_html=True)
+    cc[2].markdown(_kpi_tile("REORDER SOON", str(soon_count)), unsafe_allow_html=True)
+    cc[3].markdown(_kpi_tile("HEALTHY", str(healthy_count)), unsafe_allow_html=True)
 
     st.markdown("<div style='margin-top:32px;'></div>", unsafe_allow_html=True)
 
@@ -815,13 +817,28 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     if "days_of_supply" in display.columns:
         display["days_of_supply"] = display["days_of_supply"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "∞")
 
-    st.caption(f"Showing {len(display)} of {len(recs)} SKUs · Check rows on the left to bulk-create a purchase order.")
+    # ---- Mode toggle: click-to-detail vs bulk-select for PO ----
+    if "ap_bulk_mode" not in st.session_state:
+        st.session_state.ap_bulk_mode = False
+
+    tb_left, tb_right = st.columns([6, 2])
+    if st.session_state.ap_bulk_mode:
+        tb_left.caption(f"Showing {len(display)} of {len(recs)} SKUs · Bulk-select mode: check rows to create a purchase order.")
+        if tb_right.button("← Exit bulk select", key="ap_bulk_exit", use_container_width=True):
+            st.session_state.ap_bulk_mode = False
+            st.rerun()
+    else:
+        tb_left.caption(f"Showing {len(display)} of {len(recs)} SKUs · Click a row to open its forecast detail.")
+        if tb_right.button("Bulk select for PO →", key="ap_bulk_enter", use_container_width=True):
+            st.session_state.ap_bulk_mode = True
+            st.rerun()
+
     event = st.dataframe(
         display,
         hide_index=True,
         use_container_width=True,
         on_select="rerun",
-        selection_mode="multi-row",
+        selection_mode="multi-row" if st.session_state.ap_bulk_mode else "single-row",
         column_config={
             "image_url": st.column_config.ImageColumn("", width="small"),
         },
@@ -829,18 +846,24 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
 
     selected_rows = event.selection.rows if event and event.selection else []
 
+    # ---- Default mode: single-row click jumps to Forecast Detail ----
+    if not st.session_state.ap_bulk_mode:
+        if selected_rows:
+            idx = selected_rows[0]
+            sku = display.iloc[idx]["sku"]
+            st.session_state.fd_selected_sku = sku
+            st.session_state.page = "Forecast Detail"
+            st.rerun()
+        _supabase_edit_link("products")
+        return
+
+    # ---- Bulk-select mode: show PO form below table ----
     if selected_rows:
         selected_skus_df = filtered.iloc[selected_rows].copy()
         n = len(selected_skus_df)
 
         st.divider()
-        bar = st.columns([4, 1])
-        bar[0].markdown(f"### {n} SKU{'s' if n != 1 else ''} selected")
-        if n == 1:
-            if bar[1].button("View forecast →", key="view_one_btn", use_container_width=True):
-                st.session_state.fd_selected_sku = str(selected_skus_df.iloc[0]["sku"])
-                st.session_state.page = "Forecast Detail"
-                st.rerun()
+        st.markdown(f"### {n} SKU{'s' if n != 1 else ''} selected")
 
         with st.expander(f"📋 Create purchase order for these {n} SKU{'s' if n != 1 else ''}", expanded=True):
             with st.form(f"bulk_po_form_{n}"):
@@ -930,7 +953,7 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     _supabase_edit_link("products")
 
 
-if page == "Reorder Alerts":
+if page == "Reorder Dashboard":
     render_reorder_alerts(recs, data)
 elif page == "Forecast Detail":
     render_forecast_detail(recs, data)
