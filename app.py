@@ -466,9 +466,9 @@ def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6
         if sub else ''
     )
     if large:
-        padding = "20px 24px"
-        label_size = "clamp(11px,0.8vw,13px)"
-        value_size = "clamp(36px,4.5vw,64px)"
+        padding = "16px 20px"
+        label_size = "clamp(10px,0.75vw,12px)"
+        value_size = "clamp(28px,3vw,44px)"
     else:
         padding = "14px 16px"
         label_size = "clamp(9px,0.7vw,11px)"
@@ -738,21 +738,79 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     if filt_sales.empty:
         st.info("No sales data for the selected filters / range.")
     else:
-        if gran_freq:
-            grouped = filt_sales.groupby(pd.Grouper(key="date", freq=gran_freq), as_index=False)[["units", "revenue"]].sum()
-        else:
-            grouped = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+        # ---- Proportional category bar (clickable to filter line chart) ----
+        sales_cat = filt_sales.merge(recs[["sku", "category"]], on="sku", how="left").dropna(subset=["category"])
+        cat_rev = sales_cat.groupby("category", as_index=False)["revenue"].sum()
+        if not cat_rev.empty and cat_rev["revenue"].sum() > 0:
+            cat_rev["pct"] = (cat_rev["revenue"] / cat_rev["revenue"].sum() * 100).round(1)
+            cat_rev["_y"] = "Total"  # dummy column so all bars stack on one row
+            cat_rev = cat_rev.sort_values("revenue", ascending=False)
 
-        if metric == "Revenue":
-            st.altair_chart(
-                _hover_line_chart(grouped, y_field="revenue", y_format="$,.0f", color=PASTEL_PEACH, height=260),
-                use_container_width=True,
+            cat_area_sel = alt.selection_point(fields=["category"], on="click", name="area_cat_click")
+            area = (
+                alt.Chart(cat_rev)
+                .mark_bar(cursor="pointer", stroke="white", strokeWidth=1)
+                .encode(
+                    x=alt.X("revenue:Q", stack="zero", axis=None),
+                    y=alt.Y("_y:N", axis=None),
+                    color=alt.Color(
+                        "category:N",
+                        scale=alt.Scale(range=PASTEL_PALETTE),
+                        legend=alt.Legend(orient="bottom", title=None, columns=6),
+                    ),
+                    opacity=alt.condition(cat_area_sel, alt.value(1.0), alt.value(0.55)),
+                    tooltip=[
+                        alt.Tooltip("category:N", title="Category"),
+                        alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
+                        alt.Tooltip("pct:Q", title="Share", format=".1f"),
+                    ],
+                )
+                .add_params(cat_area_sel)
+                .properties(height=46)
             )
+            area_event = st.altair_chart(
+                area,
+                use_container_width=True,
+                on_select="rerun",
+                key="ov_area_cat",
+            )
+            if area_event and getattr(area_event, "selection", None):
+                clicked = area_event.selection.get("area_cat_click", [])
+                if isinstance(clicked, list) and clicked:
+                    clicked_cats = [c.get("category") for c in clicked if isinstance(c, dict) and c.get("category")]
+                    if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
+                        st.session_state["ov_cat"] = clicked_cats
+                        st.rerun()
+            st.caption("Click a category band above to filter the line chart and rest of the dashboard.")
+
+        # ---- Line chart ----
+        try:
+            if gran_freq:
+                grouped = (
+                    filt_sales.groupby(pd.Grouper(key="date", freq=gran_freq), as_index=False)[["units", "revenue"]]
+                    .sum()
+                )
+            else:
+                grouped = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+            grouped = grouped.dropna(subset=["date"]).sort_values("date")
+        except Exception as e:
+            st.error(f"Failed to group sales: {e}")
+            grouped = pd.DataFrame()
+
+        if grouped.empty:
+            st.info("No sales data after grouping.")
         else:
-            st.altair_chart(
-                _hover_line_chart(grouped, y_field="units", y_format=",.0f", color=PASTEL_BLUE, height=260),
-                use_container_width=True,
-            )
+            y_field = "revenue" if metric == "Revenue" else "units"
+            y_format = "$,.0f" if metric == "Revenue" else ",.0f"
+            color = PASTEL_PEACH if metric == "Revenue" else PASTEL_BLUE
+            try:
+                chart = _hover_line_chart(
+                    grouped, y_field=y_field, y_format=y_format, color=color, height=260
+                )
+                st.altair_chart(chart, use_container_width=True)
+            except Exception as e:
+                st.error(f"Chart render failed: {e}")
+                st.dataframe(grouped, use_container_width=True)
 
     st.divider()
 
@@ -787,57 +845,6 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                 "Revenue": st.column_config.NumberColumn(format="$%.0f"),
             },
         )
-
-    st.divider()
-
-    # ----------------------------------------------------------------
-    # SECTION: Revenue by Category (full width, clickable)
-    # ----------------------------------------------------------------
-    st.markdown("##### Revenue by Category")
-    st.caption(f"{range_label} · click a bar to drill into that category")
-    if filt_sales.empty:
-        st.info("No sales.")
-    else:
-        sales_cat = filt_sales.merge(
-            recs[["sku", "category"]], on="sku", how="left"
-        ).dropna(subset=["category"])
-        cat_rev = (
-            sales_cat.groupby("category", as_index=False)["revenue"]
-            .sum()
-            .sort_values("revenue", ascending=True)
-        )
-        if cat_rev.empty:
-            st.info("No category data.")
-        else:
-            cat_sel = alt.selection_point(fields=["category"], on="click", name="cat_click")
-            bar_cat = (
-                alt.Chart(cat_rev)
-                .mark_bar(cursor="pointer")
-                .encode(
-                    y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
-                    x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                    color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
-                    opacity=alt.condition(cat_sel, alt.value(1.0), alt.value(0.55)),
-                    tooltip=["category:N", alt.Tooltip("revenue:Q", format="$,.0f")],
-                )
-                .add_params(cat_sel)
-                .properties(height=280)
-            )
-            cat_event = st.altair_chart(
-                bar_cat,
-                use_container_width=True,
-                on_select="rerun",
-                key="ov_cat_bar_chart",
-            )
-            if cat_event and getattr(cat_event, "selection", None):
-                clicked_data = cat_event.selection.get("cat_click", [])
-                if isinstance(clicked_data, list) and clicked_data:
-                    clicked_cats = [
-                        c.get("category") for c in clicked_data if isinstance(c, dict) and c.get("category")
-                    ]
-                    if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
-                        st.session_state["ov_cat"] = clicked_cats
-                        st.rerun()
 
     st.divider()
 
