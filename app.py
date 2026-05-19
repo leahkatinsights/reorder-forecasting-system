@@ -411,6 +411,58 @@ STATUS_COLORS = {
 }
 
 
+def _hover_line_chart(
+    df: pd.DataFrame,
+    x_field: str = "date",
+    y_field: str = "revenue",
+    y_format: str = "$,.0f",
+    height: int = 200,
+    color: str = "#111",
+    tooltip_extra: list | None = None,
+) -> "alt.LayerChart":
+    """Interactive Altair line chart with hover guideline + dot + value label.
+
+    df must have x_field (temporal) and y_field (quantitative).
+    tooltip_extra: list of additional alt.Tooltip() entries to show on hover.
+    """
+    nearest = alt.selection_point(nearest=True, on="pointerover", fields=[x_field], empty=False)
+
+    base = alt.Chart(df).encode(x=alt.X(f"{x_field}:T", axis=alt.Axis(title=None)))
+
+    line = base.mark_line(color=color, strokeWidth=2.5).encode(
+        y=alt.Y(f"{y_field}:Q", axis=alt.Axis(title=None, format=y_format)),
+    )
+
+    # Invisible wide selection layer for easier hover targeting
+    selectors = base.mark_point().encode(opacity=alt.value(0)).add_params(nearest)
+
+    points = line.mark_point(size=90, color=color, filled=True).encode(
+        opacity=alt.condition(nearest, alt.value(1), alt.value(0))
+    )
+
+    tooltip_list = [
+        alt.Tooltip(f"{x_field}:T", title="Date", format="%b %d, %Y"),
+        alt.Tooltip(f"{y_field}:Q", title=y_field.title(), format=y_format),
+    ]
+    if tooltip_extra:
+        tooltip_list.extend(tooltip_extra)
+    elif "units" in df.columns and y_field != "units":
+        tooltip_list.append(alt.Tooltip("units:Q", title="Units"))
+
+    hover_points = line.mark_point(size=120, color=color, filled=True, opacity=0).encode(
+        opacity=alt.condition(nearest, alt.value(0.001), alt.value(0)),
+        tooltip=tooltip_list,
+    )
+
+    text = line.mark_text(align="left", dx=8, dy=-12, color="#111", fontSize=12, fontWeight=600).encode(
+        text=alt.condition(nearest, alt.Text(f"{y_field}:Q", format=y_format), alt.value(" "))
+    )
+
+    rules = base.mark_rule(color="#bbb").encode().transform_filter(nearest)
+
+    return alt.layer(line, selectors, points, hover_points, rules, text).properties(height=height)
+
+
 def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     st.header("Overview")
 
@@ -480,21 +532,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             # Chart 1: All sales
             st.markdown("##### Daily Revenue — All Products")
             daily_all = recent_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
-            chart_all = (
-                alt.Chart(daily_all)
-                .mark_line(color="#111", strokeWidth=2.5)
-                .encode(
-                    x=alt.X("date:T", axis=alt.Axis(title=None)),
-                    y=alt.Y("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                    tooltip=[
-                        alt.Tooltip("date:T", format="%b %d, %Y"),
-                        alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
-                        alt.Tooltip("units:Q", title="Units"),
-                    ],
-                )
-                .properties(height=200)
-            )
-            st.altair_chart(chart_all, use_container_width=True)
+            st.altair_chart(_hover_line_chart(daily_all), use_container_width=True)
 
             # Chart 2: Excluding products > $1000
             sub = f"Excluding {len(machine_skus)} SKU(s) with avg sale price over $1,000" if machine_skus else "No products with avg sale price over $1,000 in this period."
@@ -506,21 +544,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                 st.info("No remaining sales after excluding products over $1,000.")
             else:
                 daily_filtered = filtered_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
-                chart_filtered = (
-                    alt.Chart(daily_filtered)
-                    .mark_line(color="#111", strokeWidth=2.5)
-                    .encode(
-                        x=alt.X("date:T", axis=alt.Axis(title=None)),
-                        y=alt.Y("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                        tooltip=[
-                            alt.Tooltip("date:T", format="%b %d, %Y"),
-                            alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
-                            alt.Tooltip("units:Q", title="Units"),
-                        ],
-                    )
-                    .properties(height=200)
-                )
-                st.altair_chart(chart_filtered, use_container_width=True)
+                st.altair_chart(_hover_line_chart(daily_filtered), use_container_width=True)
 
     st.divider()
 
@@ -785,19 +809,36 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
 
     combined = pd.concat([actual_df, forecast_df], ignore_index=True)
 
-    chart = (
-        alt.Chart(combined)
-        .mark_line()
-        .encode(
-            x="date:T",
-            y="units:Q",
-            color=alt.Color(
-                "kind:N",
-                scale=alt.Scale(domain=["actual", "forecast"], range=["#1E3A5F", "#D4829A"]),
-            ),
-        )
-        .properties(height=300)
+    nearest = alt.selection_point(nearest=True, on="pointerover", fields=["date"], empty=False)
+
+    base = alt.Chart(combined).encode(x=alt.X("date:T", axis=alt.Axis(title=None)))
+
+    lines = base.mark_line(strokeWidth=2.5).encode(
+        y=alt.Y("units:Q", axis=alt.Axis(title="Units")),
+        color=alt.Color(
+            "kind:N",
+            scale=alt.Scale(domain=["actual", "forecast"], range=["#111", "#9A9AA0"]),
+            legend=alt.Legend(orient="top-right", title=None),
+        ),
     )
+    selectors = base.mark_point().encode(opacity=alt.value(0)).add_params(nearest)
+    points = lines.mark_point(size=90, filled=True).encode(
+        opacity=alt.condition(nearest, alt.value(1), alt.value(0))
+    )
+    hover_points = lines.mark_point(size=120, filled=True, opacity=0).encode(
+        opacity=alt.condition(nearest, alt.value(0.001), alt.value(0)),
+        tooltip=[
+            alt.Tooltip("date:T", title="Date", format="%b %d, %Y"),
+            alt.Tooltip("units:Q", title="Units", format=".2f"),
+            alt.Tooltip("kind:N", title="Series"),
+        ],
+    )
+    text = lines.mark_text(align="left", dx=8, dy=-12, color="#111", fontSize=12, fontWeight=600).encode(
+        text=alt.condition(nearest, alt.Text("units:Q", format=".2f"), alt.value(" "))
+    )
+    rules = base.mark_rule(color="#bbb").encode().transform_filter(nearest)
+
+    chart = alt.layer(lines, selectors, points, hover_points, rules, text).properties(height=300)
     st.altair_chart(chart, use_container_width=True)
 
     st.divider()
