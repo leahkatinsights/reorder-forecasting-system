@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import altair as alt
@@ -411,6 +411,48 @@ STATUS_COLORS = {
 }
 
 
+def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Render a date range picker (preset + optional custom) and return (start, end) Timestamps."""
+    today = datetime.now().date()
+    presets = {
+        "Last 7 days":   7,
+        "Last 30 days":  30,
+        "Last 90 days":  90,
+        "Last 6 months": 180,
+        "Last year":     365,
+        "Custom range":  None,
+    }
+    preset_names = list(presets.keys())
+    default_name = "Last 90 days" if default_days == 90 else preset_names[0]
+
+    c1, c2 = st.columns([2, 3])
+    preset = c1.selectbox(
+        "Date range",
+        preset_names,
+        index=preset_names.index(default_name),
+        key=f"{key_prefix}_preset",
+    )
+
+    if preset == "Custom range":
+        default_start = today - timedelta(days=default_days)
+        custom = c2.date_input(
+            "Pick a range",
+            value=(default_start, today),
+            max_value=today,
+            key=f"{key_prefix}_custom",
+        )
+        if isinstance(custom, tuple) and len(custom) == 2 and custom[0] and custom[1]:
+            start, end = custom
+        else:
+            start, end = default_start, today
+    else:
+        days = presets[preset]
+        start = today - timedelta(days=days)
+        end = today
+
+    return pd.Timestamp(start), pd.Timestamp(end)
+
+
 def _hover_line_chart(
     df: pd.DataFrame,
     x_field: str = "date",
@@ -487,6 +529,12 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     st.divider()
 
+    # ---- Date range picker (applies to sales charts + top products) ----
+    range_start, range_end = _date_range_picker(key_prefix="overview", default_days=90)
+    range_label = f"{range_start.strftime('%b %d, %Y')} – {range_end.strftime('%b %d, %Y')}"
+
+    st.divider()
+
     # ---- Section 2: Inventory by category (full width) ----
     st.markdown("##### Inventory Value by Category")
     cat_value = (
@@ -517,12 +565,10 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     if sales.empty or "revenue" not in sales.columns:
         st.info("Refresh data to pull sales (revenue requires a fresh Shopify fetch).")
     else:
-        end = pd.Timestamp(datetime.now().date())
-        start = end - pd.Timedelta(days=90)
-        recent_sales = sales[(sales["date"] >= start) & (sales["date"] <= end)]
+        recent_sales = sales[(sales["date"] >= range_start) & (sales["date"] <= range_end)]
 
         if recent_sales.empty:
-            st.info("No sales in the last 90 days.")
+            st.info(f"No sales in the selected range ({range_label}).")
         else:
             # Identify high-ticket SKUs (avg sale price > $1000)
             sku_totals = recent_sales.groupby("sku", as_index=False)[["units", "revenue"]].sum()
@@ -531,13 +577,14 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
             # Chart 1: All sales
             st.markdown("##### Daily Revenue — All Products")
+            st.caption(range_label)
             daily_all = recent_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
             st.altair_chart(_hover_line_chart(daily_all), use_container_width=True)
 
             # Chart 2: Excluding products > $1000
             sub = f"Excluding {len(machine_skus)} SKU(s) with avg sale price over $1,000" if machine_skus else "No products with avg sale price over $1,000 in this period."
             st.markdown("##### Daily Revenue — Excluding Products Over $1,000")
-            st.caption(sub)
+            st.caption(f"{range_label} · {sub}")
 
             filtered_sales = recent_sales[~recent_sales["sku"].isin(machine_skus)]
             if filtered_sales.empty:
@@ -548,15 +595,14 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     st.divider()
 
-    # ---- Section 4: Top Products by Sales (last 90 days) ----
-    st.markdown("##### Top Products by Sales (last 90 days)")
+    # ---- Section 4: Top Products by Sales (selected range) ----
+    st.markdown("##### Top Products by Sales")
+    st.caption(range_label)
     if not sales.empty and "revenue" in sales.columns:
-        end = pd.Timestamp(datetime.now().date())
-        start = end - pd.Timedelta(days=90)
-        recent_sales = sales[(sales["date"] >= start) & (sales["date"] <= end)]
+        recent_sales = sales[(sales["date"] >= range_start) & (sales["date"] <= range_end)]
 
         if recent_sales.empty:
-            st.info("No sales in the last 90 days.")
+            st.info(f"No sales in {range_label}.")
         else:
             top = (
                 recent_sales.groupby("sku", as_index=False)[["units", "revenue"]]
