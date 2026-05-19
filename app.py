@@ -785,14 +785,21 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
         # ---- Line chart ----
         try:
+            df_for_group = filt_sales.copy()
+            df_for_group["date"] = pd.to_datetime(df_for_group["date"])
             if gran_freq:
                 grouped = (
-                    filt_sales.groupby(pd.Grouper(key="date", freq=gran_freq), as_index=False)[["units", "revenue"]]
+                    df_for_group.groupby(pd.Grouper(key="date", freq=gran_freq))[["units", "revenue"]]
                     .sum()
+                    .reset_index()
                 )
             else:
-                grouped = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
-            grouped = grouped.dropna(subset=["date"]).sort_values("date")
+                grouped = (
+                    df_for_group.groupby("date")[["units", "revenue"]]
+                    .sum()
+                    .reset_index()
+                )
+            grouped = grouped[grouped["date"].notna()].sort_values("date")
         except Exception as e:
             st.error(f"Failed to group sales: {e}")
             grouped = pd.DataFrame()
