@@ -434,16 +434,57 @@ PASTEL_PEACH = "#FFB99D"
 PASTEL_BLUE = "#9CC5DF"
 
 
-def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Calendar-based date range picker. Returns (start, end) Timestamps."""
-    today = datetime.now().date()
-    default_start = today - timedelta(days=default_days)
+def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6") -> str:
+    """Render a KPI as a styled card. Returns HTML string for use with st.markdown(unsafe_allow_html=True)."""
+    sub_html = f'<div style="font-size: 11px; color: #888; margin-top: 6px;">{sub}</div>' if sub else ""
+    return f"""
+    <div style="
+        background: {bg};
+        border-radius: 10px;
+        padding: 18px 20px;
+        min-height: 110px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    ">
+        <div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: #6b6b73;">{label}</div>
+        <div>
+            <div style="font-size: 28px; font-weight: 900; color: #111; line-height: 1.05; letter-spacing: -0.02em; font-family: 'Inter', sans-serif;">{value}</div>
+            {sub_html}
+        </div>
+    </div>
+    """
 
+
+def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Calendar + quick-preset date range picker. Returns (start, end) Timestamps."""
+    from datetime import date as _date
+
+    today = datetime.now().date()
+    cal_key = f"{key_prefix}_calendar"
+    if cal_key not in st.session_state:
+        st.session_state[cal_key] = (today - timedelta(days=default_days), today)
+
+    # Quick presets (chip-style buttons that update the calendar)
+    presets = [
+        ("7D",  lambda: (today - timedelta(days=7),   today)),
+        ("30D", lambda: (today - timedelta(days=30),  today)),
+        ("90D", lambda: (today - timedelta(days=90),  today)),
+        ("6M",  lambda: (today - timedelta(days=180), today)),
+        ("1Y",  lambda: (today - timedelta(days=365), today)),
+        ("YTD", lambda: (_date(today.year, 1, 1),     today)),
+    ]
+    chip_cols = st.columns(len(presets))
+    for i, (label, getter) in enumerate(presets):
+        if chip_cols[i].button(label, key=f"{key_prefix}_p_{label}", use_container_width=True):
+            st.session_state[cal_key] = getter()
+            st.rerun()
+
+    # Calendar
     custom = st.date_input(
-        "Date range",
-        value=(default_start, today),
+        "Or pick a range",
         max_value=today,
-        key=f"{key_prefix}_calendar",
+        key=cal_key,
         format="MMM DD, YYYY",
     )
 
@@ -452,7 +493,7 @@ def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> 
     elif isinstance(custom, tuple) and len(custom) == 1:
         start, end = custom[0], today
     else:
-        start, end = default_start, today
+        start, end = today - timedelta(days=default_days), today
 
     return pd.Timestamp(start), pd.Timestamp(end)
 
@@ -629,12 +670,12 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     soon_count = int((filt_recs["status"] == "reorder_soon").sum())
 
     k = st.columns(6)
-    k[0].metric("SKUs in scope", len(filt_recs))
-    k[1].metric("Revenue", f"${total_revenue:,.0f}")
-    k[2].metric("Units sold", f"{total_units:,}")
-    k[3].metric("Avg daily revenue", f"${avg_daily_rev:,.0f}")
-    k[4].metric("Reorder Now", now_count)
-    k[5].metric("Reorder Soon", soon_count)
+    k[0].markdown(_kpi_card("SKUs in scope", f"{len(filt_recs):,}", bg="#C5E0DF"), unsafe_allow_html=True)
+    k[1].markdown(_kpi_card("Revenue",       f"${total_revenue:,.0f}", sub=range_label, bg="#FFC4A3"), unsafe_allow_html=True)
+    k[2].markdown(_kpi_card("Units sold",    f"{total_units:,}",       sub=range_label, bg="#A4C8E0"), unsafe_allow_html=True)
+    k[3].markdown(_kpi_card("Avg daily $",   f"${avg_daily_rev:,.0f}", sub=range_label, bg="#D0BDE0"), unsafe_allow_html=True)
+    k[4].markdown(_kpi_card("Reorder Now",   f"{now_count:,}",         sub="current",   bg="#F5B9C9"), unsafe_allow_html=True)
+    k[5].markdown(_kpi_card("Reorder Soon",  f"{soon_count:,}",        sub="current",   bg="#F2D98D"), unsafe_allow_html=True)
 
     if exclude_high and excluded_skus:
         st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
