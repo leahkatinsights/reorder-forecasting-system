@@ -52,15 +52,22 @@ st.markdown(
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
-        padding: 10px 14px !important;
+        padding: 5px 12px !important;
         justify-content: flex-start !important;
         text-align: left !important;
         color: #555 !important;
         font-weight: 500 !important;
         font-size: 14px !important;
-        border-radius: 8px !important;
+        border-radius: 6px !important;
         min-height: 0 !important;
-        line-height: 1.4 !important;
+        line-height: 1.3 !important;
+    }
+    /* Tighten gap between nav buttons */
+    section[data-testid="stSidebar"] [data-testid="stButton"] {
+        margin-bottom: 2px !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        gap: 0px !important;
     }
     section[data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
         background: #F4F4F6 !important;
