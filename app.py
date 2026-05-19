@@ -680,12 +680,14 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         # Hero Revenue card (full width, large)
         st.markdown(_kpi_card("Revenue", _fmt_compact(total_revenue, "$"), large=True), unsafe_allow_html=True)
         st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-        # 4 small supporting cards
-        r2 = st.columns(4, gap="small")
-        r2[0].markdown(_kpi_card("Units sold",    _fmt_compact(total_units)),        unsafe_allow_html=True)
-        r2[1].markdown(_kpi_card("Avg daily $",   _fmt_compact(avg_daily_rev, "$")), unsafe_allow_html=True)
-        r2[2].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs))),     unsafe_allow_html=True)
-        r2[3].markdown(_kpi_card("Reorder Now",   _fmt_compact(now_count)),          unsafe_allow_html=True)
+        # 4 supporting cards in a 2x2 grid
+        r2 = st.columns(2, gap="small")
+        r2[0].markdown(_kpi_card("Units sold",  _fmt_compact(total_units)),        unsafe_allow_html=True)
+        r2[1].markdown(_kpi_card("Avg daily $", _fmt_compact(avg_daily_rev, "$")), unsafe_allow_html=True)
+        st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+        r3 = st.columns(2, gap="small")
+        r3[0].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs))), unsafe_allow_html=True)
+        r3[1].markdown(_kpi_card("Reorder Now",   _fmt_compact(now_count)),      unsafe_allow_html=True)
 
     if exclude_high and excluded_skus:
         st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
@@ -712,192 +714,161 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         st.divider()
 
     # ----------------------------------------------------------------
-    # SECTION: Sales Trends (Revenue + Units side by side)
+    # SECTION: Single line chart with Revenue / Units toggle
     # ----------------------------------------------------------------
     title_row = st.columns([3, 2])
-    title_row[0].markdown("##### Sales Trends")
-    default_gran = "Month" if days_in_range > 60 else ("Week" if days_in_range > 21 else "Day")
+    title_row[0].markdown("##### Sales Trend")
     with title_row[1]:
-        granularity = st.radio(
-            "Granularity",
-            ["Day", "Week", "Month"],
-            index=["Day", "Week", "Month"].index(default_gran),
+        metric = st.radio(
+            "Metric",
+            ["Revenue", "Units"],
             horizontal=True,
-            key="ov_granularity",
+            key="ov_trend_metric",
             label_visibility="collapsed",
         )
-    st.caption(f"{range_label} · grouped by {granularity.lower()}")
+    # Auto-pick granularity based on range
+    if days_in_range > 60:
+        gran_freq, gran_label = "MS", "month"
+    elif days_in_range > 21:
+        gran_freq, gran_label = "W-MON", "week"
+    else:
+        gran_freq, gran_label = None, "day"
+    st.caption(f"{range_label} · grouped by {gran_label}")
 
     if filt_sales.empty:
         st.info("No sales data for the selected filters / range.")
     else:
-        # Aggregate by chosen granularity
-        if granularity == "Month":
-            grouped = filt_sales.groupby(pd.Grouper(key="date", freq="MS"), as_index=False)[["units", "revenue"]].sum()
-        elif granularity == "Week":
-            grouped = filt_sales.groupby(pd.Grouper(key="date", freq="W-MON"), as_index=False)[["units", "revenue"]].sum()
+        if gran_freq:
+            grouped = filt_sales.groupby(pd.Grouper(key="date", freq=gran_freq), as_index=False)[["units", "revenue"]].sum()
         else:
             grouped = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Revenue**")
+        if metric == "Revenue":
             st.altair_chart(
-                _hover_line_chart(grouped, y_field="revenue", y_format="$,.0f", color=PASTEL_PEACH, height=220),
+                _hover_line_chart(grouped, y_field="revenue", y_format="$,.0f", color=PASTEL_PEACH, height=260),
                 use_container_width=True,
             )
-        with c2:
-            st.markdown("**Units**")
+        else:
             st.altair_chart(
-                _hover_line_chart(grouped, y_field="units", y_format=",.0f", color=PASTEL_BLUE, height=220),
+                _hover_line_chart(grouped, y_field="units", y_format=",.0f", color=PASTEL_BLUE, height=260),
                 use_container_width=True,
             )
 
     st.divider()
 
     # ----------------------------------------------------------------
-    # SECTION: Breakdowns (Top Products + Revenue by Category)
+    # SECTION: Top Products by Revenue (full width)
     # ----------------------------------------------------------------
-    b1, b2 = st.columns(2)
-
-    with b1:
-        st.markdown("##### Top Products by Revenue")
-        st.caption(range_label)
-        if filt_sales.empty:
-            st.info("No sales.")
-        else:
-            top = (
-                filt_sales.groupby("sku", as_index=False)[["units", "revenue"]]
-                .sum()
-                .sort_values("revenue", ascending=False)
-                .head(15)
-            )
-            top["name"] = top["sku"].map(name_by_sku).fillna("—")
-            image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
-            top["image_url"] = top["sku"].map(image_by_sku).fillna("")
-            top["revenue"] = top["revenue"].round(2)
-            top["avg_price"] = (top["revenue"] / top["units"].clip(lower=1)).round(2)
-            disp = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
-            disp.columns = ["Image", "SKU", "Product", "Units", "Avg $", "Revenue"]
-            st.dataframe(
-                disp,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Image": st.column_config.ImageColumn("Image", width="small"),
-                    "Avg $": st.column_config.NumberColumn(format="$%.2f"),
-                    "Revenue": st.column_config.NumberColumn(format="$%.0f"),
-                },
-            )
-
-    with b2:
-        st.markdown("##### Revenue by Category")
-        st.caption(range_label)
-        if filt_sales.empty:
-            st.info("No sales.")
-        else:
-            sales_cat = filt_sales.merge(
-                recs[["sku", "category"]], on="sku", how="left"
-            ).dropna(subset=["category"])
-            cat_rev = (
-                sales_cat.groupby("category", as_index=False)["revenue"]
-                .sum()
-                .sort_values("revenue", ascending=True)
-            )
-            if cat_rev.empty:
-                st.info("No category data.")
-            else:
-                cat_sel = alt.selection_point(fields=["category"], on="click", name="cat_click")
-                bar_cat = (
-                    alt.Chart(cat_rev)
-                    .mark_bar(cursor="pointer")
-                    .encode(
-                        y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
-                        x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                        color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
-                        opacity=alt.condition(cat_sel, alt.value(1.0), alt.value(0.55)),
-                        tooltip=["category:N", alt.Tooltip("revenue:Q", format="$,.0f")],
-                    )
-                    .add_params(cat_sel)
-                    .properties(height=300)
-                )
-                cat_event = st.altair_chart(
-                    bar_cat,
-                    use_container_width=True,
-                    on_select="rerun",
-                    key="ov_cat_bar_chart",
-                )
-                # Click → update the Category multiselect, which the rest of the dashboard already reacts to
-                if cat_event and getattr(cat_event, "selection", None):
-                    clicked_data = cat_event.selection.get("cat_click", [])
-                    if isinstance(clicked_data, list) and clicked_data:
-                        clicked_cats = [
-                            c.get("category") for c in clicked_data if isinstance(c, dict) and c.get("category")
-                        ]
-                        if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
-                            st.session_state["ov_cat"] = clicked_cats
-                            st.rerun()
-                st.caption("Click a bar to drill into that category.")
-
-    st.divider()
-
-    # ----------------------------------------------------------------
-    # SECTION: Revenue by Vendor + Current Inventory Value by Category
-    # ----------------------------------------------------------------
-    v1, v2 = st.columns(2)
-
-    with v1:
-        st.markdown("##### Revenue by Vendor")
-        st.caption(range_label)
-        if filt_sales.empty or vendors_df.empty:
-            st.info("No vendor sales data.")
-        else:
-            sales_v = filt_sales.merge(recs[["sku", "vendor_id"]], on="sku", how="left").dropna(subset=["vendor_id"])
-            if sales_v.empty:
-                st.info("None of the SKUs in scope have a vendor set.")
-            else:
-                vendor_rev = sales_v.groupby("vendor_id", as_index=False)["revenue"].sum()
-                vendor_rev["vendor"] = vendor_rev["vendor_id"].map(vendor_names).fillna("Unknown")
-                vendor_rev = vendor_rev.sort_values("revenue", ascending=True)
-                bar_v = (
-                    alt.Chart(vendor_rev)
-                    .mark_bar()
-                    .encode(
-                        y=alt.Y("vendor:N", sort="-x", axis=alt.Axis(title=None)),
-                        x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                        color=alt.Color("vendor:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
-                        tooltip=["vendor:N", alt.Tooltip("revenue:Q", format="$,.0f")],
-                    )
-                    .properties(height=300)
-                )
-                st.altair_chart(bar_v, use_container_width=True)
-
-    with v2:
-        st.markdown("##### Current Inventory Value by Category")
-        st.caption("Current snapshot — does not change with date range")
-        recs_inv = filt_recs.copy()
-        recs_inv["inv_value"] = recs_inv["unit_cost"] * (recs_inv["on_hand_clinic"] + recs_inv["on_hand_wsa"])
-        cat_value = (
-            recs_inv.dropna(subset=["category"])
-            .groupby("category", as_index=False)["inv_value"]
+    st.markdown("##### Top Products by Revenue")
+    st.caption(range_label)
+    if filt_sales.empty:
+        st.info("No sales.")
+    else:
+        top = (
+            filt_sales.groupby("sku", as_index=False)[["units", "revenue"]]
             .sum()
-            .sort_values("inv_value", ascending=True)
+            .sort_values("revenue", ascending=False)
+            .head(15)
         )
-        if cat_value.empty or cat_value["inv_value"].sum() == 0:
-            st.info("No unit_cost data yet — fill in the products table.")
+        top["name"] = top["sku"].map(name_by_sku).fillna("—")
+        image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
+        top["image_url"] = top["sku"].map(image_by_sku).fillna("")
+        top["revenue"] = top["revenue"].round(2)
+        top["avg_price"] = (top["revenue"] / top["units"].clip(lower=1)).round(2)
+        disp = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
+        disp.columns = ["Image", "SKU", "Product", "Units", "Avg $", "Revenue"]
+        st.dataframe(
+            disp,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Image": st.column_config.ImageColumn("Image", width="small"),
+                "Avg $": st.column_config.NumberColumn(format="$%.2f"),
+                "Revenue": st.column_config.NumberColumn(format="$%.0f"),
+            },
+        )
+
+    st.divider()
+
+    # ----------------------------------------------------------------
+    # SECTION: Revenue by Category (full width, clickable)
+    # ----------------------------------------------------------------
+    st.markdown("##### Revenue by Category")
+    st.caption(f"{range_label} · click a bar to drill into that category")
+    if filt_sales.empty:
+        st.info("No sales.")
+    else:
+        sales_cat = filt_sales.merge(
+            recs[["sku", "category"]], on="sku", how="left"
+        ).dropna(subset=["category"])
+        cat_rev = (
+            sales_cat.groupby("category", as_index=False)["revenue"]
+            .sum()
+            .sort_values("revenue", ascending=True)
+        )
+        if cat_rev.empty:
+            st.info("No category data.")
         else:
-            bar_inv = (
-                alt.Chart(cat_value)
-                .mark_bar()
+            cat_sel = alt.selection_point(fields=["category"], on="click", name="cat_click")
+            bar_cat = (
+                alt.Chart(cat_rev)
+                .mark_bar(cursor="pointer")
                 .encode(
                     y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
-                    x=alt.X("inv_value:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                    x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
                     color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
-                    tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
+                    opacity=alt.condition(cat_sel, alt.value(1.0), alt.value(0.55)),
+                    tooltip=["category:N", alt.Tooltip("revenue:Q", format="$,.0f")],
                 )
-                .properties(height=300)
+                .add_params(cat_sel)
+                .properties(height=280)
             )
-            st.altair_chart(bar_inv, use_container_width=True)
+            cat_event = st.altair_chart(
+                bar_cat,
+                use_container_width=True,
+                on_select="rerun",
+                key="ov_cat_bar_chart",
+            )
+            if cat_event and getattr(cat_event, "selection", None):
+                clicked_data = cat_event.selection.get("cat_click", [])
+                if isinstance(clicked_data, list) and clicked_data:
+                    clicked_cats = [
+                        c.get("category") for c in clicked_data if isinstance(c, dict) and c.get("category")
+                    ]
+                    if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
+                        st.session_state["ov_cat"] = clicked_cats
+                        st.rerun()
+
+    st.divider()
+
+    # ----------------------------------------------------------------
+    # SECTION: Current Inventory Value by Category (full width)
+    # ----------------------------------------------------------------
+    st.markdown("##### Current Inventory Value by Category")
+    st.caption("Current snapshot — does not change with date range")
+    recs_inv = filt_recs.copy()
+    recs_inv["inv_value"] = recs_inv["unit_cost"] * (recs_inv["on_hand_clinic"] + recs_inv["on_hand_wsa"])
+    cat_value = (
+        recs_inv.dropna(subset=["category"])
+        .groupby("category", as_index=False)["inv_value"]
+        .sum()
+        .sort_values("inv_value", ascending=True)
+    )
+    if cat_value.empty or cat_value["inv_value"].sum() == 0:
+        st.info("No unit_cost data yet — fill in the products table.")
+    else:
+        bar_inv = (
+            alt.Chart(cat_value)
+            .mark_bar()
+            .encode(
+                y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
+                x=alt.X("inv_value:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
+            )
+            .properties(height=260)
+        )
+        st.altair_chart(bar_inv, use_container_width=True)
 
     st.divider()
 
