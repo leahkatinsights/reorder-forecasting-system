@@ -485,7 +485,7 @@ def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> 
         "Or pick a range",
         max_value=today,
         key=cal_key,
-        format="MMM DD, YYYY",
+        format="MM/DD/YYYY",
     )
 
     if isinstance(custom, tuple) and len(custom) == 2 and custom[0] and custom[1]:
