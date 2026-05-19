@@ -738,38 +738,69 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     if filt_sales.empty:
         st.info("No sales data for the selected filters / range.")
     else:
-        # ---- Proportional category bar (clickable to filter line chart) ----
+        # ---- Proportional category map (clickable to filter) ----
         sales_cat = filt_sales.merge(recs[["sku", "category"]], on="sku", how="left").dropna(subset=["category"])
         cat_rev = sales_cat.groupby("category", as_index=False)["revenue"].sum()
         if not cat_rev.empty and cat_rev["revenue"].sum() > 0:
-            cat_rev["pct"] = (cat_rev["revenue"] / cat_rev["revenue"].sum() * 100).round(1)
-            cat_rev["_y"] = "Total"  # dummy column so all bars stack on one row
-            cat_rev = cat_rev.sort_values("revenue", ascending=False)
+            cat_rev["pct"] = cat_rev["revenue"] / cat_rev["revenue"].sum()
+            cat_rev["pct_label"] = (cat_rev["pct"] * 100).round(1).astype(str) + "%"
+            cat_rev["rev_label"] = cat_rev["revenue"].apply(lambda x: _fmt_compact(x, "$"))
+            cat_rev = cat_rev.sort_values("revenue", ascending=False).reset_index(drop=True)
+            # Compute rect positions for a horizontal proportional map
+            cat_rev["x_end"] = cat_rev["pct"].cumsum()
+            cat_rev["x_start"] = cat_rev["x_end"].shift(fill_value=0.0)
 
             cat_area_sel = alt.selection_point(fields=["category"], on="click", name="area_cat_click")
-            area = (
+
+            rect = (
                 alt.Chart(cat_rev)
-                .mark_bar(cursor="pointer", stroke="white", strokeWidth=1)
+                .mark_rect(cursor="pointer", stroke="white", strokeWidth=3)
                 .encode(
-                    x=alt.X("revenue:Q", stack="zero", axis=None),
-                    y=alt.Y("_y:N", axis=None),
-                    color=alt.Color(
-                        "category:N",
-                        scale=alt.Scale(range=PASTEL_PALETTE),
-                        legend=alt.Legend(orient="bottom", title=None, columns=6),
-                    ),
-                    opacity=alt.condition(cat_area_sel, alt.value(1.0), alt.value(0.55)),
+                    x=alt.X("x_start:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+                    x2="x_end:Q",
+                    color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                    opacity=alt.condition(cat_area_sel, alt.value(1.0), alt.value(0.5)),
                     tooltip=[
                         alt.Tooltip("category:N", title="Category"),
                         alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
-                        alt.Tooltip("pct:Q", title="Share", format=".1f"),
+                        alt.Tooltip("pct_label:N", title="Share"),
                     ],
                 )
                 .add_params(cat_area_sel)
-                .properties(height=46)
             )
+
+            # Compute the midpoint for label positioning
+            cat_rev["x_mid"] = (cat_rev["x_start"] + cat_rev["x_end"]) / 2
+
+            name_text = (
+                alt.Chart(cat_rev)
+                .mark_text(
+                    align="center", baseline="middle",
+                    color="#111", fontWeight=700, fontSize=13, dy=-8,
+                )
+                .encode(
+                    x=alt.X("x_mid:Q", scale=alt.Scale(domain=[0, 1])),
+                    text="category:N",
+                    tooltip=alt.value(None),
+                )
+            )
+            value_text = (
+                alt.Chart(cat_rev)
+                .mark_text(
+                    align="center", baseline="middle",
+                    color="#333", fontWeight=500, fontSize=12, dy=12,
+                )
+                .encode(
+                    x=alt.X("x_mid:Q", scale=alt.Scale(domain=[0, 1])),
+                    text="rev_label:N",
+                    tooltip=alt.value(None),
+                )
+            )
+
+            map_chart = alt.layer(rect, name_text, value_text).properties(height=100)
+
             area_event = st.altair_chart(
-                area,
+                map_chart,
                 use_container_width=True,
                 on_select="rerun",
                 key="ov_area_cat",
@@ -781,7 +812,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                     if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
                         st.session_state["ov_cat"] = clicked_cats
                         st.rerun()
-            st.caption("Click a category band above to filter the line chart and rest of the dashboard.")
+            st.caption("Click a category rectangle to filter the dashboard.")
 
         # ---- Line chart ----
         try:
