@@ -1138,10 +1138,19 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     actual_df = pd.DataFrame({"date": series.index, "units": series.values, "kind": "actual"})
 
     # Project flat at current velocity. The model is a velocity model, not a daily-detail forecast.
+    velocity = float(row["daily_velocity"])
+    hist_std = float(series.std()) if len(series) > 1 else 0.0
     future_dates = pd.date_range(start=series.index[-1] + pd.Timedelta(days=1), periods=60, freq="D")
     forecast_df = pd.DataFrame(
-        {"date": future_dates, "units": row["daily_velocity"], "kind": "forecast"}
+        {"date": future_dates, "units": velocity, "kind": "forecast"}
     )
+    # Confidence band: +/- 1 std of historical daily sales (roughly 68% prediction interval).
+    # Lower bound clamped at 0 (no negative sales).
+    band_df = pd.DataFrame({
+        "date": future_dates,
+        "lo": max(0.0, velocity - hist_std),
+        "hi": velocity + hist_std,
+    })
 
     combined = pd.concat([actual_df, forecast_df], ignore_index=True)
 
@@ -1149,6 +1158,21 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
 
     base = alt.Chart(combined).encode(x=alt.X("date:T", axis=alt.Axis(title=None)))
 
+    # Confidence band (drawn first so it sits behind everything)
+    band = (
+        alt.Chart(band_df)
+        .mark_area(opacity=0.20, color="#9A9AA0")
+        .encode(
+            x=alt.X("date:T", axis=alt.Axis(title=None)),
+            y=alt.Y("lo:Q", axis=alt.Axis(title="Units")),
+            y2="hi:Q",
+            tooltip=[
+                alt.Tooltip("date:T", title="Date", format="%b %d, %Y"),
+                alt.Tooltip("lo:Q", title="Low (-1σ)", format=".2f"),
+                alt.Tooltip("hi:Q", title="High (+1σ)", format=".2f"),
+            ],
+        )
+    )
     lines = base.mark_line(strokeWidth=2.5).encode(
         y=alt.Y("units:Q", axis=alt.Axis(title="Units")),
         color=alt.Color(
@@ -1174,8 +1198,9 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     )
     rules = base.mark_rule(color="#bbb").encode().transform_filter(nearest)
 
-    chart = alt.layer(lines, selectors, points, hover_points, rules, text).properties(height=300)
+    chart = alt.layer(band, lines, selectors, points, hover_points, rules, text).properties(height=300)
     st.altair_chart(chart, use_container_width=True)
+    st.caption(f"Shaded band = ±1 std of historical daily sales (~68% range). σ = {hist_std:.2f} units/day")
 
     st.divider()
     with st.expander("Math breakdown"):
