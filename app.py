@@ -452,24 +452,33 @@ def _fmt_compact(n: float, prefix: str = "") -> str:
     return f"{prefix}{n:,.0f}"
 
 
-def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6") -> str:
+def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6", large: bool = False) -> str:
     """Render a KPI as a styled card. Returns HTML string for st.markdown(unsafe_allow_html=True).
 
     The HTML is intentionally NOT indented — Streamlit's CommonMark parser would otherwise
     treat 4-space-indented HTML as a code block.
     Font sizes use clamp() so text scales smoothly when the card is narrow.
+    Pass `large=True` for a hero/featured card with a much bigger value.
     """
     sub_html = (
         f'<div style="font-size:clamp(9px,0.7vw,11px);color:#888;margin-top:4px;'
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{sub}</div>'
         if sub else ''
     )
+    if large:
+        padding = "20px 24px"
+        label_size = "clamp(11px,0.8vw,13px)"
+        value_size = "clamp(36px,4.5vw,64px)"
+    else:
+        padding = "14px 16px"
+        label_size = "clamp(9px,0.7vw,11px)"
+        value_size = "clamp(18px,2vw,28px)"
     return (
-        f'<div style="background:{bg};border-radius:10px;padding:14px 16px;min-width:0;">'
-        f'<div style="font-size:clamp(9px,0.7vw,11px);font-weight:700;letter-spacing:0.08em;'
+        f'<div style="background:{bg};border-radius:10px;padding:{padding};min-width:0;">'
+        f'<div style="font-size:{label_size};font-weight:700;letter-spacing:0.08em;'
         f'text-transform:uppercase;color:#6b6b73;margin-bottom:8px;'
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{label}</div>'
-        f'<div style="font-size:clamp(18px,2vw,28px);font-weight:900;color:#111;line-height:1.1;'
+        f'<div style="font-size:{value_size};font-weight:900;color:#111;line-height:1.05;'
         f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;"
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{value}</div>'
         f'{sub_html}'
@@ -668,15 +677,15 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     soon_count = int((filt_recs["status"] == "reorder_soon").sum())
 
     with top_right:
-        r1 = st.columns(3, gap="small")
-        r1[0].markdown(_kpi_card("Revenue",       _fmt_compact(total_revenue, "$")), unsafe_allow_html=True)
-        r1[1].markdown(_kpi_card("Units sold",    _fmt_compact(total_units)),        unsafe_allow_html=True)
-        r1[2].markdown(_kpi_card("Avg daily $",   _fmt_compact(avg_daily_rev, "$")), unsafe_allow_html=True)
+        # Hero Revenue card (full width, large)
+        st.markdown(_kpi_card("Revenue", _fmt_compact(total_revenue, "$"), large=True), unsafe_allow_html=True)
         st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-        r2 = st.columns(3, gap="small")
-        r2[0].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs))),     unsafe_allow_html=True)
-        r2[1].markdown(_kpi_card("Reorder Now",   _fmt_compact(now_count)),          unsafe_allow_html=True)
-        r2[2].markdown(_kpi_card("Reorder Soon",  _fmt_compact(soon_count)),         unsafe_allow_html=True)
+        # 4 small supporting cards
+        r2 = st.columns(4, gap="small")
+        r2[0].markdown(_kpi_card("Units sold",    _fmt_compact(total_units)),        unsafe_allow_html=True)
+        r2[1].markdown(_kpi_card("Avg daily $",   _fmt_compact(avg_daily_rev, "$")), unsafe_allow_html=True)
+        r2[2].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs))),     unsafe_allow_html=True)
+        r2[3].markdown(_kpi_card("Reorder Now",   _fmt_compact(now_count)),          unsafe_allow_html=True)
 
     if exclude_high and excluded_skus:
         st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
