@@ -775,7 +775,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                     ],
                 )
                 .add_params(cat_area_sel)
-                .properties(height=80)
+                .properties(height=160)
             )
 
             area_event = st.altair_chart(
