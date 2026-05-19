@@ -399,6 +399,176 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
     st.markdown("<hr class='alert-row-divider'>", unsafe_allow_html=True)
 
 
+STATUS_COLORS = {
+    "reorder_now":          "#C44757",
+    "reorder_soon":         "#E0A53B",
+    "healthy":              "#5A9A6E",
+    "slow":                 "#9A9AA0",
+    "dead":                 "#6B6B70",
+    "insufficient_history": "#C0C0C5",
+    "manual_override":      "#888888",
+}
+
+
+def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
+    st.header("Reorder Dashboard")
+
+    if recs.empty:
+        st.info("No products loaded yet. Run `seed_products.py` first.")
+        return
+
+    # ---- Section 1: KPI strip ----
+    total_skus = len(recs)
+    now_count = int((recs["status"] == "reorder_now").sum())
+    soon_count = int((recs["status"] == "reorder_soon").sum())
+
+    recs_inv = recs.copy()
+    recs_inv["inv_value"] = recs_inv["unit_cost"] * (recs_inv["on_hand_clinic"] + recs_inv["on_hand_wsa"])
+    total_inv_value = float(recs_inv["inv_value"].sum(skipna=True))
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total SKUs", total_skus)
+    k2.metric("🔴 Reorder Now", now_count)
+    k3.metric("🟡 Reorder Soon", soon_count)
+    k4.metric("Inventory Value", f"${total_inv_value:,.0f}")
+
+    st.divider()
+
+    # ---- Section 2: Status donut + Inventory by category ----
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("##### Status Breakdown")
+        sc = recs["status"].value_counts().reset_index()
+        sc.columns = ["status", "count"]
+        donut = (
+            alt.Chart(sc)
+            .mark_arc(innerRadius=55, outerRadius=90)
+            .encode(
+                theta=alt.Theta("count:Q", stack=True),
+                color=alt.Color(
+                    "status:N",
+                    scale=alt.Scale(domain=list(STATUS_COLORS.keys()), range=list(STATUS_COLORS.values())),
+                    legend=alt.Legend(orient="right", title=None),
+                ),
+                tooltip=["status:N", "count:Q"],
+            )
+            .properties(height=240)
+        )
+        st.altair_chart(donut, use_container_width=True)
+
+    with c2:
+        st.markdown("##### Inventory Value by Category")
+        cat_value = (
+            recs_inv.dropna(subset=["category"])
+            .groupby("category", as_index=False)["inv_value"]
+            .sum()
+            .sort_values("inv_value", ascending=True)
+        )
+        if cat_value.empty or cat_value["inv_value"].sum() == 0:
+            st.info("No unit_cost data yet — fill in the products table to see inventory value.")
+        else:
+            bar = (
+                alt.Chart(cat_value)
+                .mark_bar(color="#1E3A5F")
+                .encode(
+                    y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
+                    x=alt.X("inv_value:Q", axis=alt.Axis(title="$ value", format="$,.0f")),
+                    tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
+                )
+                .properties(height=240)
+            )
+            st.altair_chart(bar, use_container_width=True)
+
+    st.divider()
+
+    # ---- Section 3: Velocity vs days-of-supply scatter ----
+    st.markdown("##### Velocity vs Days of Supply")
+    st.caption("Each dot = 1 SKU. Color = status. Size = inventory $ value. Hover for details.")
+
+    scatter_df = recs_inv.copy()
+    DOS_CAP = 365
+    scatter_df["dos_capped"] = scatter_df["days_of_supply"].fillna(DOS_CAP).clip(upper=DOS_CAP)
+    scatter_df["inv_value"] = scatter_df["inv_value"].fillna(0)
+
+    scatter = (
+        alt.Chart(scatter_df)
+        .mark_circle(opacity=0.7, stroke="white", strokeWidth=0.5)
+        .encode(
+            x=alt.X("daily_velocity:Q", axis=alt.Axis(title="Velocity (units/day)")),
+            y=alt.Y("dos_capped:Q", axis=alt.Axis(title="Days of supply (capped at 365)")),
+            color=alt.Color(
+                "status:N",
+                scale=alt.Scale(domain=list(STATUS_COLORS.keys()), range=list(STATUS_COLORS.values())),
+                legend=alt.Legend(orient="bottom", title=None),
+            ),
+            size=alt.Size("inv_value:Q", scale=alt.Scale(range=[40, 500]), legend=None),
+            tooltip=[
+                "sku:N", "name:N", "status:N",
+                alt.Tooltip("daily_velocity:Q", title="Velocity/day", format=".2f"),
+                alt.Tooltip("days_of_supply:Q", title="Days of supply", format=".1f"),
+                alt.Tooltip("inv_value:Q", title="Inventory $", format="$,.0f"),
+            ],
+        )
+        .properties(height=400)
+    )
+    st.altair_chart(scatter, use_container_width=True)
+
+    st.divider()
+
+    # ---- Section 4: Sales trend last 90 days ----
+    st.markdown("##### Sales Trend (last 90 days)")
+    sales = data["sales"]
+    if not sales.empty:
+        end = pd.Timestamp(datetime.now().date())
+        start = end - pd.Timedelta(days=90)
+        trend = sales[(sales["date"] >= start) & (sales["date"] <= end)]
+        if not trend.empty:
+            daily = trend.groupby("date", as_index=False)["units"].sum()
+            line = (
+                alt.Chart(daily)
+                .mark_line(color="#1E3A5F", strokeWidth=2.5)
+                .encode(
+                    x=alt.X("date:T", axis=alt.Axis(title=None)),
+                    y=alt.Y("units:Q", axis=alt.Axis(title="Units sold")),
+                    tooltip=[alt.Tooltip("date:T", format="%b %d"), "units:Q"],
+                )
+                .properties(height=220)
+            )
+            st.altair_chart(line, use_container_width=True)
+        else:
+            st.info("No sales in the last 90 days.")
+    else:
+        st.info("No sales data loaded.")
+
+    st.divider()
+
+    # ---- Section 5: Top 10 most urgent ----
+    st.markdown("##### Top 10 Most Urgent")
+    urgent = recs[recs["status"].isin(["reorder_now", "reorder_soon"])].copy()
+    urgent = urgent.sort_values(["status", "days_of_supply"], ascending=[True, True]).head(10)
+
+    if urgent.empty:
+        st.success("Nothing needs reordering right now.")
+    else:
+        for _, r in urgent.iterrows():
+            icon = "🔴" if r["status"] == "reorder_now" else "🟡"
+            cols = st.columns([1, 1, 5, 1, 1, 1])
+            cols[0].markdown(f"### {icon}")
+            if r.get("image_url"):
+                cols[1].image(r["image_url"], width=50)
+            cols[2].markdown(
+                f"**{r['sku']}**  \n<span style='color:#666;font-size:12px;'>{r['name']}</span>",
+                unsafe_allow_html=True,
+            )
+            total = int(r["on_hand_clinic"]) + int(r["on_hand_wsa"])
+            cols[3].metric("On hand", total)
+            cols[4].metric(
+                "Days left",
+                f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞",
+            )
+            cols[5].metric("Rec qty", int(r["recommended_qty"]))
+
+
 def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     st.header("Reorder Dashboard")
 
@@ -954,7 +1124,7 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
 
 
 if page == "Reorder Dashboard":
-    render_reorder_alerts(recs, data)
+    render_dashboard(recs, data)
 elif page == "Forecast Detail":
     render_forecast_detail(recs, data)
 elif page == "Purchase Log":
