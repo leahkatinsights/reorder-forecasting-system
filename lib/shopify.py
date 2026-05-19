@@ -145,7 +145,7 @@ def fetch_products() -> pd.DataFrame:
 def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
     """Return daily units sold per SKU for the last `days_back` days.
 
-    Columns: sku, date, units. One row per (sku, day) for days with sales.
+    Columns: sku, date, units, revenue. One row per (sku, day) for days with sales.
     """
     since = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
 
@@ -168,14 +168,18 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
             qty = li.get("quantity") or 0
             if not sku or qty <= 0:
                 continue
-            line_rows.append({"sku": sku, "date": created, "units": qty})
+            try:
+                price = float(li.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            line_rows.append({"sku": sku, "date": created, "units": qty, "revenue": price * qty})
 
     if not line_rows:
-        return pd.DataFrame(columns=["sku", "date", "units"])
+        return pd.DataFrame(columns=["sku", "date", "units", "revenue"])
 
     df = pd.DataFrame(line_rows)
     df["date"] = pd.to_datetime(df["date"])
-    daily = df.groupby(["sku", "date"], as_index=False)["units"].sum()
+    daily = df.groupby(["sku", "date"], as_index=False)[["units", "revenue"]].sum()
     return daily
 
 

@@ -435,111 +435,136 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     st.divider()
 
-    # ---- Section 2: Status donut + Inventory by category ----
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("##### Status Breakdown")
-        sc = recs["status"].value_counts().reset_index()
-        sc.columns = ["status", "count"]
-        donut = (
-            alt.Chart(sc)
-            .mark_arc(innerRadius=55, outerRadius=90)
-            .encode(
-                theta=alt.Theta("count:Q", stack=True),
-                color=alt.Color(
-                    "status:N",
-                    scale=alt.Scale(domain=list(STATUS_COLORS.keys()), range=list(STATUS_COLORS.values())),
-                    legend=alt.Legend(orient="right", title=None),
-                ),
-                tooltip=["status:N", "count:Q"],
-            )
-            .properties(height=240)
-        )
-        st.altair_chart(donut, use_container_width=True)
-
-    with c2:
-        st.markdown("##### Inventory Value by Category")
-        cat_value = (
-            recs_inv.dropna(subset=["category"])
-            .groupby("category", as_index=False)["inv_value"]
-            .sum()
-            .sort_values("inv_value", ascending=True)
-        )
-        if cat_value.empty or cat_value["inv_value"].sum() == 0:
-            st.info("No unit_cost data yet — fill in the products table to see inventory value.")
-        else:
-            bar = (
-                alt.Chart(cat_value)
-                .mark_bar(color="#1E3A5F")
-                .encode(
-                    y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
-                    x=alt.X("inv_value:Q", axis=alt.Axis(title="$ value", format="$,.0f")),
-                    tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
-                )
-                .properties(height=240)
-            )
-            st.altair_chart(bar, use_container_width=True)
-
-    st.divider()
-
-    # ---- Section 3: Velocity vs days-of-supply scatter ----
-    st.markdown("##### Velocity vs Days of Supply")
-    st.caption("Each dot = 1 SKU. Color = status. Size = inventory $ value. Hover for details.")
-
-    scatter_df = recs_inv.copy()
-    DOS_CAP = 365
-    scatter_df["dos_capped"] = scatter_df["days_of_supply"].fillna(DOS_CAP).clip(upper=DOS_CAP)
-    scatter_df["inv_value"] = scatter_df["inv_value"].fillna(0)
-
-    scatter = (
-        alt.Chart(scatter_df)
-        .mark_circle(opacity=0.7, stroke="white", strokeWidth=0.5)
-        .encode(
-            x=alt.X("daily_velocity:Q", axis=alt.Axis(title="Velocity (units/day)")),
-            y=alt.Y("dos_capped:Q", axis=alt.Axis(title="Days of supply (capped at 365)")),
-            color=alt.Color(
-                "status:N",
-                scale=alt.Scale(domain=list(STATUS_COLORS.keys()), range=list(STATUS_COLORS.values())),
-                legend=alt.Legend(orient="bottom", title=None),
-            ),
-            size=alt.Size("inv_value:Q", scale=alt.Scale(range=[40, 500]), legend=None),
-            tooltip=[
-                "sku:N", "name:N", "status:N",
-                alt.Tooltip("daily_velocity:Q", title="Velocity/day", format=".2f"),
-                alt.Tooltip("days_of_supply:Q", title="Days of supply", format=".1f"),
-                alt.Tooltip("inv_value:Q", title="Inventory $", format="$,.0f"),
-            ],
-        )
-        .properties(height=400)
+    # ---- Section 2: Inventory by category (full width) ----
+    st.markdown("##### Inventory Value by Category")
+    cat_value = (
+        recs_inv.dropna(subset=["category"])
+        .groupby("category", as_index=False)["inv_value"]
+        .sum()
+        .sort_values("inv_value", ascending=True)
     )
-    st.altair_chart(scatter, use_container_width=True)
+    if cat_value.empty or cat_value["inv_value"].sum() == 0:
+        st.info("No unit_cost data yet — fill in the products table to see inventory value.")
+    else:
+        bar = (
+            alt.Chart(cat_value)
+            .mark_bar(color="#111")
+            .encode(
+                y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None, labelFontSize=13)),
+                x=alt.X("inv_value:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
+            )
+            .properties(height=260)
+        )
+        st.altair_chart(bar, use_container_width=True)
 
     st.divider()
 
-    # ---- Section 4: Sales trend last 90 days ----
-    st.markdown("##### Sales Trend (last 90 days)")
+    # ---- Section 3: Daily sales — two views (all products + excluding machines > $1000) ----
     sales = data["sales"]
-    if not sales.empty:
+    if sales.empty or "revenue" not in sales.columns:
+        st.info("Refresh data to pull sales (revenue requires a fresh Shopify fetch).")
+    else:
         end = pd.Timestamp(datetime.now().date())
         start = end - pd.Timedelta(days=90)
-        trend = sales[(sales["date"] >= start) & (sales["date"] <= end)]
-        if not trend.empty:
-            daily = trend.groupby("date", as_index=False)["units"].sum()
-            line = (
-                alt.Chart(daily)
-                .mark_line(color="#1E3A5F", strokeWidth=2.5)
+        recent_sales = sales[(sales["date"] >= start) & (sales["date"] <= end)]
+
+        if recent_sales.empty:
+            st.info("No sales in the last 90 days.")
+        else:
+            # Identify high-ticket SKUs (avg sale price > $1000)
+            sku_totals = recent_sales.groupby("sku", as_index=False)[["units", "revenue"]].sum()
+            sku_totals["avg_price"] = sku_totals["revenue"] / sku_totals["units"].clip(lower=1)
+            machine_skus = set(sku_totals.loc[sku_totals["avg_price"] > 1000, "sku"])
+
+            # Chart 1: All sales
+            st.markdown("##### Daily Revenue — All Products")
+            daily_all = recent_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+            chart_all = (
+                alt.Chart(daily_all)
+                .mark_line(color="#111", strokeWidth=2.5)
                 .encode(
                     x=alt.X("date:T", axis=alt.Axis(title=None)),
-                    y=alt.Y("units:Q", axis=alt.Axis(title="Units sold")),
-                    tooltip=[alt.Tooltip("date:T", format="%b %d"), "units:Q"],
+                    y=alt.Y("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                    tooltip=[
+                        alt.Tooltip("date:T", format="%b %d, %Y"),
+                        alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
+                        alt.Tooltip("units:Q", title="Units"),
+                    ],
                 )
-                .properties(height=220)
+                .properties(height=200)
             )
-            st.altair_chart(line, use_container_width=True)
-        else:
+            st.altair_chart(chart_all, use_container_width=True)
+
+            # Chart 2: Excluding products > $1000
+            sub = f"Excluding {len(machine_skus)} SKU(s) with avg sale price over $1,000" if machine_skus else "No products with avg sale price over $1,000 in this period."
+            st.markdown("##### Daily Revenue — Excluding Products Over $1,000")
+            st.caption(sub)
+
+            filtered_sales = recent_sales[~recent_sales["sku"].isin(machine_skus)]
+            if filtered_sales.empty:
+                st.info("No remaining sales after excluding products over $1,000.")
+            else:
+                daily_filtered = filtered_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+                chart_filtered = (
+                    alt.Chart(daily_filtered)
+                    .mark_line(color="#111", strokeWidth=2.5)
+                    .encode(
+                        x=alt.X("date:T", axis=alt.Axis(title=None)),
+                        y=alt.Y("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                        tooltip=[
+                            alt.Tooltip("date:T", format="%b %d, %Y"),
+                            alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
+                            alt.Tooltip("units:Q", title="Units"),
+                        ],
+                    )
+                    .properties(height=200)
+                )
+                st.altair_chart(chart_filtered, use_container_width=True)
+
+    st.divider()
+
+    # ---- Section 4: Top Products by Sales (last 90 days) ----
+    st.markdown("##### Top Products by Sales (last 90 days)")
+    if not sales.empty and "revenue" in sales.columns:
+        end = pd.Timestamp(datetime.now().date())
+        start = end - pd.Timedelta(days=90)
+        recent_sales = sales[(sales["date"] >= start) & (sales["date"] <= end)]
+
+        if recent_sales.empty:
             st.info("No sales in the last 90 days.")
+        else:
+            top = (
+                recent_sales.groupby("sku", as_index=False)[["units", "revenue"]]
+                .sum()
+                .sort_values("revenue", ascending=False)
+                .head(15)
+            )
+
+            # Join with product names and images
+            name_by_sku = recs.set_index("sku")["name"].to_dict()
+            image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
+
+            top["name"] = top["sku"].map(name_by_sku).fillna("—")
+            top["image_url"] = top["sku"].map(image_by_sku).fillna("")
+            top["revenue"] = top["revenue"].round(2)
+            top["avg_price"] = (top["revenue"] / top["units"]).round(2)
+
+            display_top = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
+            display_top.columns = ["", "SKU", "Product", "Units", "Avg price", "Revenue"]
+
+            st.dataframe(
+                display_top,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "": st.column_config.ImageColumn("", width="small"),
+                    "Avg price": st.column_config.NumberColumn(format="$%.2f"),
+                    "Revenue": st.column_config.NumberColumn(format="$%.0f"),
+                },
+            )
     else:
-        st.info("No sales data loaded.")
+        st.info("Refresh data to populate sales history (revenue requires a fresh pull from Shopify).")
 
     st.divider()
 
