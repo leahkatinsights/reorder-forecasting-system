@@ -435,25 +435,24 @@ PASTEL_BLUE = "#9CC5DF"
 
 
 def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6") -> str:
-    """Render a KPI as a styled card. Returns HTML string for use with st.markdown(unsafe_allow_html=True)."""
-    sub_html = f'<div style="font-size: 11px; color: #888; margin-top: 6px;">{sub}</div>' if sub else ""
-    return f"""
-    <div style="
-        background: {bg};
-        border-radius: 10px;
-        padding: 18px 20px;
-        min-height: 110px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-    ">
-        <div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: #6b6b73;">{label}</div>
-        <div>
-            <div style="font-size: 28px; font-weight: 900; color: #111; line-height: 1.05; letter-spacing: -0.02em; font-family: 'Inter', sans-serif;">{value}</div>
-            {sub_html}
-        </div>
-    </div>
+    """Render a KPI as a styled card. Returns HTML string for st.markdown(unsafe_allow_html=True).
+
+    The HTML is intentionally NOT indented — Streamlit's CommonMark parser would otherwise
+    treat 4-space-indented HTML as a code block.
     """
+    sub_html = f'<div style="font-size:11px;color:#888;margin-top:6px;">{sub}</div>' if sub else ""
+    return (
+        f'<div style="background:{bg};border-radius:10px;padding:18px 20px;min-height:110px;'
+        f'display:flex;flex-direction:column;justify-content:space-between;">'
+        f'<div style="font-size:10.5px;font-weight:700;letter-spacing:0.10em;'
+        f'text-transform:uppercase;color:#6b6b73;">{label}</div>'
+        f'<div>'
+        f'<div style="font-size:28px;font-weight:900;color:#111;line-height:1.05;'
+        f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;\">{value}</div>"
+        f'{sub_html}'
+        f'</div>'
+        f'</div>'
+    )
 
 
 def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> tuple[pd.Timestamp, pd.Timestamp]:
