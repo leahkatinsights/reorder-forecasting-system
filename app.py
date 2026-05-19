@@ -670,12 +670,12 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     soon_count = int((filt_recs["status"] == "reorder_soon").sum())
 
     k = st.columns(6)
-    k[0].markdown(_kpi_card("SKUs in scope", f"{len(filt_recs):,}", bg="#C5E0DF"), unsafe_allow_html=True)
-    k[1].markdown(_kpi_card("Revenue",       f"${total_revenue:,.0f}", sub=range_label, bg="#FFC4A3"), unsafe_allow_html=True)
-    k[2].markdown(_kpi_card("Units sold",    f"{total_units:,}",       sub=range_label, bg="#A4C8E0"), unsafe_allow_html=True)
-    k[3].markdown(_kpi_card("Avg daily $",   f"${avg_daily_rev:,.0f}", sub=range_label, bg="#D0BDE0"), unsafe_allow_html=True)
-    k[4].markdown(_kpi_card("Reorder Now",   f"{now_count:,}",         sub="current",   bg="#F5B9C9"), unsafe_allow_html=True)
-    k[5].markdown(_kpi_card("Reorder Soon",  f"{soon_count:,}",        sub="current",   bg="#F2D98D"), unsafe_allow_html=True)
+    k[0].markdown(_kpi_card("SKUs in scope", f"{len(filt_recs):,}"), unsafe_allow_html=True)
+    k[1].markdown(_kpi_card("Revenue",       f"${total_revenue:,.0f}", sub=range_label), unsafe_allow_html=True)
+    k[2].markdown(_kpi_card("Units sold",    f"{total_units:,}",       sub=range_label), unsafe_allow_html=True)
+    k[3].markdown(_kpi_card("Avg daily $",   f"${avg_daily_rev:,.0f}", sub=range_label), unsafe_allow_html=True)
+    k[4].markdown(_kpi_card("Reorder Now",   f"{now_count:,}",         sub="current"),   unsafe_allow_html=True)
+    k[5].markdown(_kpi_card("Reorder Soon",  f"{soon_count:,}",        sub="current"),   unsafe_allow_html=True)
 
     if exclude_high and excluded_skus:
         st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
