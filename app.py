@@ -439,17 +439,21 @@ def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6
 
     The HTML is intentionally NOT indented — Streamlit's CommonMark parser would otherwise
     treat 4-space-indented HTML as a code block.
+    Font sizes use clamp() so text scales smoothly when the card is narrow.
     """
     sub_html = (
-        f'<div style="font-size:11px;color:#888;margin-top:4px;">{sub}</div>'
-        if sub else '<div style="font-size:11px;color:transparent;margin-top:4px;">.</div>'
+        f'<div style="font-size:clamp(9px,0.7vw,11px);color:#888;margin-top:4px;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{sub}</div>'
+        if sub else '<div style="font-size:clamp(9px,0.7vw,11px);color:transparent;margin-top:4px;">.</div>'
     )
     return (
-        f'<div style="background:{bg};border-radius:10px;padding:14px 16px;">'
-        f'<div style="font-size:10px;font-weight:700;letter-spacing:0.10em;'
-        f'text-transform:uppercase;color:#6b6b73;margin-bottom:8px;">{label}</div>'
-        f'<div style="font-size:24px;font-weight:900;color:#111;line-height:1.1;'
-        f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;\">{value}</div>"
+        f'<div style="background:{bg};border-radius:10px;padding:14px 16px;min-width:0;">'
+        f'<div style="font-size:clamp(9px,0.7vw,11px);font-weight:700;letter-spacing:0.08em;'
+        f'text-transform:uppercase;color:#6b6b73;margin-bottom:8px;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{label}</div>'
+        f'<div style="font-size:clamp(18px,2vw,28px);font-weight:900;color:#111;line-height:1.1;'
+        f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;"
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{value}</div>'
         f'{sub_html}'
         f'</div>'
     )
@@ -683,24 +687,42 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     # ----------------------------------------------------------------
     # SECTION: Sales Trends (Revenue + Units side by side)
     # ----------------------------------------------------------------
-    st.markdown("##### Sales Trends")
-    st.caption(range_label)
+    title_row = st.columns([3, 2])
+    title_row[0].markdown("##### Sales Trends")
+    default_gran = "Month" if days_in_range > 60 else ("Week" if days_in_range > 21 else "Day")
+    with title_row[1]:
+        granularity = st.radio(
+            "Granularity",
+            ["Day", "Week", "Month"],
+            index=["Day", "Week", "Month"].index(default_gran),
+            horizontal=True,
+            key="ov_granularity",
+            label_visibility="collapsed",
+        )
+    st.caption(f"{range_label} · grouped by {granularity.lower()}")
 
     if filt_sales.empty:
         st.info("No sales data for the selected filters / range.")
     else:
-        daily = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+        # Aggregate by chosen granularity
+        if granularity == "Month":
+            grouped = filt_sales.groupby(pd.Grouper(key="date", freq="MS"), as_index=False)[["units", "revenue"]].sum()
+        elif granularity == "Week":
+            grouped = filt_sales.groupby(pd.Grouper(key="date", freq="W-MON"), as_index=False)[["units", "revenue"]].sum()
+        else:
+            grouped = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Revenue**")
             st.altair_chart(
-                _hover_line_chart(daily, y_field="revenue", y_format="$,.0f", color=PASTEL_PEACH, height=220),
+                _hover_line_chart(grouped, y_field="revenue", y_format="$,.0f", color=PASTEL_PEACH, height=220),
                 use_container_width=True,
             )
         with c2:
             st.markdown("**Units**")
             st.altair_chart(
-                _hover_line_chart(daily, y_field="units", y_format=",.0f", color=PASTEL_BLUE, height=220),
+                _hover_line_chart(grouped, y_field="units", y_format=",.0f", color=PASTEL_BLUE, height=220),
                 use_container_width=True,
             )
 
