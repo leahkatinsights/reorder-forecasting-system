@@ -62,22 +62,31 @@ st.markdown(
     .block-container { padding-top: 1.5rem !important; }
 
     /* ---- Page headers: big bold display font (Inter Black 900) ---- */
-    h1, h2, h3,
+    h1, h2, h3, h4, h5, h6,
     [data-testid="stHeading"] h1,
     [data-testid="stHeading"] h2,
     [data-testid="stHeading"] h3,
+    [data-testid="stHeading"] h4,
+    [data-testid="stHeading"] h5,
+    [data-testid="stHeading"] h6,
     [data-testid="stMarkdownContainer"] h1,
     [data-testid="stMarkdownContainer"] h2,
-    [data-testid="stMarkdownContainer"] h3 {
+    [data-testid="stMarkdownContainer"] h3,
+    [data-testid="stMarkdownContainer"] h4,
+    [data-testid="stMarkdownContainer"] h5,
+    [data-testid="stMarkdownContainer"] h6 {
         font-family: 'Inter', sans-serif !important;
         font-weight: 900 !important;
         letter-spacing: -0.025em !important;
-        line-height: 1.05 !important;
+        line-height: 1.1 !important;
         color: #111 !important;
     }
     h1, [data-testid="stHeading"] h1 { font-size: 52px !important; margin-bottom: 6px !important; }
     h2, [data-testid="stHeading"] h2 { font-size: 40px !important; margin-bottom: 6px !important; }
-    h3, [data-testid="stHeading"] h3 { font-size: 24px !important; margin-bottom: 4px !important; font-weight: 800 !important; }
+    h3, [data-testid="stHeading"] h3 { font-size: 24px !important; margin-bottom: 4px !important; }
+    h4, [data-testid="stHeading"] h4 { font-size: 20px !important; margin-bottom: 4px !important; }
+    h5, [data-testid="stHeading"] h5 { font-size: 17px !important; margin-bottom: 4px !important; }
+    h6, [data-testid="stHeading"] h6 { font-size: 14px !important; margin-bottom: 4px !important; }
 
     /* ---- Reorder Alerts dashboard ---- */
     .kpi-row { padding: 4px 0; }
@@ -410,45 +419,40 @@ STATUS_COLORS = {
     "manual_override":      "#888888",
 }
 
+# Soft pastel palette used across dashboard charts
+PASTEL_PALETTE = [
+    "#FFC4A3",  # peach
+    "#A4C8E0",  # light blue
+    "#B5D8B5",  # light green
+    "#F5B9C9",  # soft pink
+    "#D0BDE0",  # light purple
+    "#F2D98D",  # light yellow
+    "#FAB5B5",  # light coral
+    "#C5E0DF",  # light teal
+]
+PASTEL_PEACH = "#FFB99D"
+PASTEL_BLUE = "#9CC5DF"
+
 
 def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Render a date range picker (preset + optional custom) and return (start, end) Timestamps."""
+    """Calendar-based date range picker. Returns (start, end) Timestamps."""
     today = datetime.now().date()
-    presets = {
-        "Last 7 days":   7,
-        "Last 30 days":  30,
-        "Last 90 days":  90,
-        "Last 6 months": 180,
-        "Last year":     365,
-        "Custom range":  None,
-    }
-    preset_names = list(presets.keys())
-    default_name = "Last 90 days" if default_days == 90 else preset_names[0]
+    default_start = today - timedelta(days=default_days)
 
-    c1, c2 = st.columns([2, 3])
-    preset = c1.selectbox(
+    custom = st.date_input(
         "Date range",
-        preset_names,
-        index=preset_names.index(default_name),
-        key=f"{key_prefix}_preset",
+        value=(default_start, today),
+        max_value=today,
+        key=f"{key_prefix}_calendar",
+        format="MMM DD, YYYY",
     )
 
-    if preset == "Custom range":
-        default_start = today - timedelta(days=default_days)
-        custom = c2.date_input(
-            "Pick a range",
-            value=(default_start, today),
-            max_value=today,
-            key=f"{key_prefix}_custom",
-        )
-        if isinstance(custom, tuple) and len(custom) == 2 and custom[0] and custom[1]:
-            start, end = custom
-        else:
-            start, end = default_start, today
+    if isinstance(custom, tuple) and len(custom) == 2 and custom[0] and custom[1]:
+        start, end = custom
+    elif isinstance(custom, tuple) and len(custom) == 1:
+        start, end = custom[0], today
     else:
-        days = presets[preset]
-        start = today - timedelta(days=days)
-        end = today
+        start, end = default_start, today
 
     return pd.Timestamp(start), pd.Timestamp(end)
 
@@ -512,165 +516,343 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         st.info("No products loaded yet. Run `seed_products.py` first.")
         return
 
-    # ---- Section 1: KPI strip ----
-    total_skus = len(recs)
-    now_count = int((recs["status"] == "reorder_now").sum())
-    soon_count = int((recs["status"] == "reorder_soon").sum())
+    sales = data.get("sales", pd.DataFrame())
+    has_revenue = (not sales.empty) and ("revenue" in sales.columns)
 
-    recs_inv = recs.copy()
-    recs_inv["inv_value"] = recs_inv["unit_cost"] * (recs_inv["on_hand_clinic"] + recs_inv["on_hand_wsa"])
-    total_inv_value = float(recs_inv["inv_value"].sum(skipna=True))
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total SKUs", total_skus)
-    k2.metric("Reorder Now", now_count)
-    k3.metric("Reorder Soon", soon_count)
-    k4.metric("Inventory Value", f"${total_inv_value:,.0f}")
-
-    st.divider()
-
-    # ---- Date range picker (applies to sales charts + top products) ----
-    range_start, range_end = _date_range_picker(key_prefix="overview", default_days=90)
+    # ----------------------------------------------------------------
+    # FILTER BAR
+    # Row 1: date range (wide) + exclude-high toggle
+    # Row 2: category | vendor | product
+    # ----------------------------------------------------------------
+    top_row = st.columns([4, 2])
+    with top_row[0]:
+        range_start, range_end = _date_range_picker(key_prefix="overview", default_days=90)
     range_label = f"{range_start.strftime('%b %d, %Y')} – {range_end.strftime('%b %d, %Y')}"
-
-    st.divider()
-
-    # ---- Section 2: Inventory by category (full width) ----
-    st.markdown("##### Inventory Value by Category")
-    cat_value = (
-        recs_inv.dropna(subset=["category"])
-        .groupby("category", as_index=False)["inv_value"]
-        .sum()
-        .sort_values("inv_value", ascending=True)
-    )
-    if cat_value.empty or cat_value["inv_value"].sum() == 0:
-        st.info("No unit_cost data yet — fill in the products table to see inventory value.")
-    else:
-        bar = (
-            alt.Chart(cat_value)
-            .mark_bar(color="#111")
-            .encode(
-                y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None, labelFontSize=13)),
-                x=alt.X("inv_value:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
-            )
-            .properties(height=260)
+    with top_row[1]:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        exclude_high = st.toggle(
+            "Exclude products over $1,000",
+            value=False,
+            key="ov_exclude_high",
         )
-        st.altair_chart(bar, use_container_width=True)
 
-    st.divider()
+    vendors_df = data.get("vendors", pd.DataFrame())
+    vendor_options = vendors_df["id"].tolist() if not vendors_df.empty else []
+    vendor_names = vendors_df.set_index("id")["name"].to_dict() if not vendors_df.empty else {}
+    name_by_sku = recs.set_index("sku")["name"].to_dict()
+    all_categories = sorted([c for c in recs["category"].dropna().unique()])
 
-    # ---- Section 3: Daily sales — two views (all products + excluding machines > $1000) ----
-    sales = data["sales"]
-    if sales.empty or "revenue" not in sales.columns:
-        st.info("Refresh data to pull sales (revenue requires a fresh Shopify fetch).")
+    fr = st.columns(3)
+    with fr[0]:
+        selected_cats = st.multiselect(
+            "Category",
+            all_categories,
+            default=[],
+            placeholder="All categories",
+            key="ov_cat",
+        )
+    with fr[1]:
+        selected_vendor_ids = st.multiselect(
+            "Vendor",
+            vendor_options,
+            default=[],
+            format_func=lambda v: vendor_names.get(v, str(v)),
+            placeholder="All vendors",
+            key="ov_vendor",
+        )
+    with fr[2]:
+        selected_skus = st.multiselect(
+            "Product",
+            sorted(recs["sku"].tolist()),
+            default=[],
+            format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+            placeholder="All products",
+            key="ov_sku",
+        )
+
+    # ----------------------------------------------------------------
+    # APPLY FILTERS
+    # ----------------------------------------------------------------
+    filt_recs = recs.copy()
+    if selected_cats:
+        filt_recs = filt_recs[filt_recs["category"].isin(selected_cats)]
+    if selected_vendor_ids:
+        filt_recs = filt_recs[filt_recs["vendor_id"].isin(selected_vendor_ids)]
+    if selected_skus:
+        filt_recs = filt_recs[filt_recs["sku"].isin(selected_skus)]
+
+    if has_revenue:
+        filt_sales = sales[(sales["date"] >= range_start) & (sales["date"] <= range_end)].copy()
+        # Restrict sales to SKUs that pass the rec-side filters
+        if selected_cats or selected_vendor_ids or selected_skus:
+            allowed = set(filt_recs["sku"].tolist())
+            filt_sales = filt_sales[filt_sales["sku"].isin(allowed)]
+        # Exclude high-ticket if requested
+        if exclude_high and not filt_sales.empty:
+            sku_tot = filt_sales.groupby("sku", as_index=False)[["units", "revenue"]].sum()
+            sku_tot["avg"] = sku_tot["revenue"] / sku_tot["units"].clip(lower=1)
+            excluded_skus = set(sku_tot.loc[sku_tot["avg"] > 1000, "sku"])
+            filt_sales = filt_sales[~filt_sales["sku"].isin(excluded_skus)]
     else:
-        recent_sales = sales[(sales["date"] >= range_start) & (sales["date"] <= range_end)]
-
-        if recent_sales.empty:
-            st.info(f"No sales in the selected range ({range_label}).")
-        else:
-            # Identify high-ticket SKUs (avg sale price > $1000)
-            sku_totals = recent_sales.groupby("sku", as_index=False)[["units", "revenue"]].sum()
-            sku_totals["avg_price"] = sku_totals["revenue"] / sku_totals["units"].clip(lower=1)
-            machine_skus = set(sku_totals.loc[sku_totals["avg_price"] > 1000, "sku"])
-
-            # Chart 1: All sales
-            st.markdown("##### Daily Revenue — All Products")
-            st.caption(range_label)
-            daily_all = recent_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
-            st.altair_chart(_hover_line_chart(daily_all), use_container_width=True)
-
-            # Chart 2: Excluding products > $1000
-            sub = f"Excluding {len(machine_skus)} SKU(s) with avg sale price over $1,000" if machine_skus else "No products with avg sale price over $1,000 in this period."
-            st.markdown("##### Daily Revenue — Excluding Products Over $1,000")
-            st.caption(f"{range_label} · {sub}")
-
-            filtered_sales = recent_sales[~recent_sales["sku"].isin(machine_skus)]
-            if filtered_sales.empty:
-                st.info("No remaining sales after excluding products over $1,000.")
-            else:
-                daily_filtered = filtered_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
-                st.altair_chart(_hover_line_chart(daily_filtered), use_container_width=True)
+        filt_sales = pd.DataFrame()
+        excluded_skus = set()
 
     st.divider()
 
-    # ---- Section 4: Top Products by Sales (selected range) ----
-    st.markdown("##### Top Products by Sales")
-    st.caption(range_label)
-    if not sales.empty and "revenue" in sales.columns:
-        recent_sales = sales[(sales["date"] >= range_start) & (sales["date"] <= range_end)]
+    # ----------------------------------------------------------------
+    # SINGLE-PRODUCT CONTEXT (only when exactly 1 SKU selected)
+    # ----------------------------------------------------------------
+    if len(selected_skus) == 1 and not filt_recs.empty:
+        p = filt_recs.iloc[0]
+        hc = st.columns([1, 5])
+        if p.get("image_url"):
+            hc[0].image(p["image_url"], width=110)
+        hc[1].markdown(
+            f"""<div style="padding-top:8px;">
+                <div style="font-family:'Inter',sans-serif;font-size:24px;font-weight:900;
+                            letter-spacing:-0.02em;color:#111;line-height:1.1;">{p['name']}</div>
+                <div style="color:#888;font-size:11px;letter-spacing:1px;text-transform:uppercase;
+                            font-family:'SF Mono','Menlo',monospace;margin-top:6px;">SKU&nbsp;·&nbsp;{p['sku']}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        st.divider()
 
-        if recent_sales.empty:
-            st.info(f"No sales in {range_label}.")
+    # ----------------------------------------------------------------
+    # KPI STRIP
+    # ----------------------------------------------------------------
+    total_revenue = float(filt_sales["revenue"].sum()) if not filt_sales.empty else 0.0
+    total_units = int(filt_sales["units"].sum()) if not filt_sales.empty else 0
+    days_in_range = max(1, (range_end - range_start).days + 1)
+    avg_daily_rev = total_revenue / days_in_range
+    now_count = int((filt_recs["status"] == "reorder_now").sum())
+    soon_count = int((filt_recs["status"] == "reorder_soon").sum())
+
+    k = st.columns(6)
+    k[0].metric("SKUs in scope", len(filt_recs))
+    k[1].metric("Revenue", f"${total_revenue:,.0f}")
+    k[2].metric("Units sold", f"{total_units:,}")
+    k[3].metric("Avg daily revenue", f"${avg_daily_rev:,.0f}")
+    k[4].metric("Reorder Now", now_count)
+    k[5].metric("Reorder Soon", soon_count)
+
+    if exclude_high and excluded_skus:
+        st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
+
+    st.divider()
+
+    # ----------------------------------------------------------------
+    # SECTION: Sales Trends (Revenue + Units side by side)
+    # ----------------------------------------------------------------
+    st.markdown("##### Sales Trends")
+    st.caption(range_label)
+
+    if filt_sales.empty:
+        st.info("No sales data for the selected filters / range.")
+    else:
+        daily = filt_sales.groupby("date", as_index=False)[["units", "revenue"]].sum()
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Revenue**")
+            st.altair_chart(
+                _hover_line_chart(daily, y_field="revenue", y_format="$,.0f", color=PASTEL_PEACH, height=220),
+                use_container_width=True,
+            )
+        with c2:
+            st.markdown("**Units**")
+            st.altair_chart(
+                _hover_line_chart(daily, y_field="units", y_format=",.0f", color=PASTEL_BLUE, height=220),
+                use_container_width=True,
+            )
+
+    st.divider()
+
+    # ----------------------------------------------------------------
+    # SECTION: Breakdowns (Top Products + Revenue by Category)
+    # ----------------------------------------------------------------
+    b1, b2 = st.columns(2)
+
+    with b1:
+        st.markdown("##### Top Products by Revenue")
+        st.caption(range_label)
+        if filt_sales.empty:
+            st.info("No sales.")
         else:
             top = (
-                recent_sales.groupby("sku", as_index=False)[["units", "revenue"]]
+                filt_sales.groupby("sku", as_index=False)[["units", "revenue"]]
                 .sum()
                 .sort_values("revenue", ascending=False)
                 .head(15)
             )
-
-            # Join with product names and images
-            name_by_sku = recs.set_index("sku")["name"].to_dict()
-            image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
-
             top["name"] = top["sku"].map(name_by_sku).fillna("—")
+            image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
             top["image_url"] = top["sku"].map(image_by_sku).fillna("")
             top["revenue"] = top["revenue"].round(2)
-            top["avg_price"] = (top["revenue"] / top["units"]).round(2)
-
-            display_top = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
-            display_top.columns = ["", "SKU", "Product", "Units", "Avg price", "Revenue"]
-
+            top["avg_price"] = (top["revenue"] / top["units"].clip(lower=1)).round(2)
+            disp = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
+            disp.columns = ["", "SKU", "Product", "Units", "Avg $", "Revenue"]
             st.dataframe(
-                display_top,
+                disp,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
                     "": st.column_config.ImageColumn("", width="small"),
-                    "Avg price": st.column_config.NumberColumn(format="$%.2f"),
+                    "Avg $": st.column_config.NumberColumn(format="$%.2f"),
                     "Revenue": st.column_config.NumberColumn(format="$%.0f"),
                 },
             )
-    else:
-        st.info("Refresh data to populate sales history (revenue requires a fresh pull from Shopify).")
+
+    with b2:
+        st.markdown("##### Revenue by Category")
+        st.caption(range_label)
+        if filt_sales.empty:
+            st.info("No sales.")
+        else:
+            sales_cat = filt_sales.merge(
+                recs[["sku", "category"]], on="sku", how="left"
+            ).dropna(subset=["category"])
+            cat_rev = (
+                sales_cat.groupby("category", as_index=False)["revenue"]
+                .sum()
+                .sort_values("revenue", ascending=True)
+            )
+            if cat_rev.empty:
+                st.info("No category data.")
+            else:
+                bar_cat = (
+                    alt.Chart(cat_rev)
+                    .mark_bar()
+                    .encode(
+                        y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
+                        x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                        color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                        tooltip=["category:N", alt.Tooltip("revenue:Q", format="$,.0f")],
+                    )
+                    .properties(height=300)
+                )
+                st.altair_chart(bar_cat, use_container_width=True)
 
     st.divider()
 
-    # ---- Section 5: Top 10 most urgent ----
+    # ----------------------------------------------------------------
+    # SECTION: Revenue by Vendor + Current Inventory Value by Category
+    # ----------------------------------------------------------------
+    v1, v2 = st.columns(2)
+
+    with v1:
+        st.markdown("##### Revenue by Vendor")
+        st.caption(range_label)
+        if filt_sales.empty or vendors_df.empty:
+            st.info("No vendor sales data.")
+        else:
+            sales_v = filt_sales.merge(recs[["sku", "vendor_id"]], on="sku", how="left").dropna(subset=["vendor_id"])
+            if sales_v.empty:
+                st.info("None of the SKUs in scope have a vendor set.")
+            else:
+                vendor_rev = sales_v.groupby("vendor_id", as_index=False)["revenue"].sum()
+                vendor_rev["vendor"] = vendor_rev["vendor_id"].map(vendor_names).fillna("Unknown")
+                vendor_rev = vendor_rev.sort_values("revenue", ascending=True)
+                bar_v = (
+                    alt.Chart(vendor_rev)
+                    .mark_bar()
+                    .encode(
+                        y=alt.Y("vendor:N", sort="-x", axis=alt.Axis(title=None)),
+                        x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                        color=alt.Color("vendor:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                        tooltip=["vendor:N", alt.Tooltip("revenue:Q", format="$,.0f")],
+                    )
+                    .properties(height=300)
+                )
+                st.altair_chart(bar_v, use_container_width=True)
+
+    with v2:
+        st.markdown("##### Current Inventory Value by Category")
+        st.caption("Current snapshot — does not change with date range")
+        recs_inv = filt_recs.copy()
+        recs_inv["inv_value"] = recs_inv["unit_cost"] * (recs_inv["on_hand_clinic"] + recs_inv["on_hand_wsa"])
+        cat_value = (
+            recs_inv.dropna(subset=["category"])
+            .groupby("category", as_index=False)["inv_value"]
+            .sum()
+            .sort_values("inv_value", ascending=True)
+        )
+        if cat_value.empty or cat_value["inv_value"].sum() == 0:
+            st.info("No unit_cost data yet — fill in the products table.")
+        else:
+            bar_inv = (
+                alt.Chart(cat_value)
+                .mark_bar()
+                .encode(
+                    y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
+                    x=alt.X("inv_value:Q", axis=alt.Axis(title=None, format="$,.0f")),
+                    color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                    tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
+                )
+                .properties(height=300)
+            )
+            st.altair_chart(bar_inv, use_container_width=True)
+
+    st.divider()
+
+    # ----------------------------------------------------------------
+    # SECTION: Top 10 Most Urgent (always current state, ignores filters)
+    # ----------------------------------------------------------------
     st.markdown("##### Top 10 Most Urgent")
+    st.caption("Current state — ignores filters above")
     urgent = recs[recs["status"].isin(["reorder_now", "reorder_soon"])].copy()
     urgent = urgent.sort_values(["status", "days_of_supply"], ascending=[True, True]).head(10)
 
     if urgent.empty:
         st.success("Nothing needs reordering right now.")
     else:
-        for _, r in urgent.iterrows():
+        for i, (_, r) in enumerate(urgent.iterrows()):
+            bg = "#F4F4F6" if i % 2 == 0 else "#FFFFFF"
             status_label = "Reorder Now" if r["status"] == "reorder_now" else "Reorder Soon"
             status_color = STATUS_COLORS.get(r["status"], "#888")
-            cols = st.columns([1, 5, 2, 1, 1, 1])
-            if r.get("image_url"):
-                cols[0].image(r["image_url"], width=50)
-            cols[1].markdown(
-                f"**{r['sku']}**  \n<span style='color:#666;font-size:12px;'>{r['name']}</span>",
-                unsafe_allow_html=True,
-            )
-            cols[2].markdown(
-                f"<div style='padding-top:14px;'>"
-                f"<span style='display:inline-block;width:8px;height:8px;border-radius:50%;"
-                f"background:{status_color};margin-right:6px;vertical-align:middle;'></span>"
-                f"<span style='font-size:13px;color:#222;vertical-align:middle;'>{status_label}</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
+            dos = f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞"
             total = int(r["on_hand_clinic"]) + int(r["on_hand_wsa"])
-            cols[3].metric("On hand", total)
-            cols[4].metric(
-                "Days left",
-                f"{r['days_of_supply']:.1f}" if r["days_of_supply"] is not None else "∞",
+            img_html = (
+                f'<img src="{r["image_url"]}" style="width:50px;height:50px;object-fit:cover;border-radius:6px;">'
+                if r.get("image_url") else '<div style="width:50px;height:50px;background:#E5E5E7;border-radius:6px;"></div>'
             )
-            cols[5].metric("Rec qty", int(r["recommended_qty"]))
+
+            st.markdown(
+                f"""
+                <div style="
+                    display:grid;
+                    grid-template-columns: 70px minmax(0, 1fr) 160px 90px 90px 90px;
+                    align-items:center;
+                    gap:18px;
+                    padding:12px 18px;
+                    background:{bg};
+                    border-radius:6px;
+                    margin-bottom:2px;
+                ">
+                    <div>{img_html}</div>
+                    <div style="min-width:0;">
+                        <div style="font-weight:700;color:#111;font-size:14px;letter-spacing:-0.01em;">{r['sku']}</div>
+                        <div style="color:#666;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{r['name']}</div>
+                    </div>
+                    <div style="font-size:13px;color:#222;">
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{status_color};margin-right:8px;vertical-align:middle;"></span>
+                        <span style="vertical-align:middle;">{status_label}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.08em;">On hand</div>
+                        <div style="font-size:22px;font-weight:800;color:#111;line-height:1.2;">{total}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.08em;">Days left</div>
+                        <div style="font-size:22px;font-weight:800;color:#111;line-height:1.2;">{dos}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.08em;">Rec qty</div>
+                        <div style="font-size:22px;font-weight:800;color:#111;line-height:1.2;">{int(r['recommended_qty'])}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
