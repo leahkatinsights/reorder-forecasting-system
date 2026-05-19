@@ -44,17 +44,47 @@ st.markdown(
 st.markdown(
     """
     <style>
-    /* Sidebar nav active state: subtle grey */
+    /* ---- Sidebar nav: link-style menu (no borders, clean text links) ---- */
+    /* All sidebar buttons strip borders + background by default */
+    section[data-testid="stSidebar"] [data-testid="stButton"] > button,
+    section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
+    section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 10px 14px !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        color: #555 !important;
+        font-weight: 500 !important;
+        font-size: 14px !important;
+        border-radius: 8px !important;
+        min-height: 0 !important;
+        line-height: 1.4 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
+        background: #F4F4F6 !important;
+        color: #111 !important;
+    }
+    /* Active (primary type) button: subtle grey background + bold dark text */
     section[data-testid="stSidebar"] button[kind="primary"] {
-        background-color: #F0F0F0;
-        color: #1E3A5F;
-        border-color: transparent;
-        font-weight: 600;
+        background: #F0F0F0 !important;
+        color: #111 !important;
+        font-weight: 700 !important;
     }
     section[data-testid="stSidebar"] button[kind="primary"]:hover {
-        background-color: #E5E5E5;
-        border-color: transparent;
-        color: #1E3A5F;
+        background: #E8E8E8 !important;
+        color: #111 !important;
+    }
+    /* Material Symbols icons in sidebar buttons: larger and lighter weight */
+    section[data-testid="stSidebar"] [data-testid="stButton"] > button [data-testid="stIconMaterial"],
+    section[data-testid="stSidebar"] [data-testid="stButton"] > button .material-symbols {
+        font-size: 22px !important;
+        margin-right: 6px !important;
+        color: #666 !important;
+    }
+    section[data-testid="stSidebar"] button[kind="primary"] [data-testid="stIconMaterial"] {
+        color: #111 !important;
     }
     /* Hide Streamlit's default top-right menu + deploy button */
     #MainMenu, [data-testid="stToolbar"], [data-testid="stDecoration"] { visibility: hidden; height: 0; }
