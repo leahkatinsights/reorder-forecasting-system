@@ -261,7 +261,8 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 # ---------- Sidebar nav ----------
 # Material Symbols render as black outlined icons by default.
 NAV_ITEMS = [
-    ("Reorder Dashboard", ":material/notifications_active:"),
+    ("Overview",          ":material/dashboard:"),
+    ("Reorder Alerts",    ":material/notifications_active:"),
     ("All Products",      ":material/inventory_2:"),
     ("Forecast Detail",   ":material/trending_up:"),
     ("Purchase Log",      ":material/receipt_long:"),
@@ -270,7 +271,7 @@ NAV_ITEMS = [
 PAGES = [label for label, _ in NAV_ITEMS]
 
 if "page" not in st.session_state:
-    st.session_state.page = "Reorder Dashboard"
+    st.session_state.page = "Overview"
 
 with st.sidebar:
     for label, icon in NAV_ITEMS:
@@ -411,7 +412,7 @@ STATUS_COLORS = {
 
 
 def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
-    st.header("Reorder Dashboard")
+    st.header("Overview")
 
     if recs.empty:
         st.info("No products loaded yet. Run `seed_products.py` first.")
@@ -428,8 +429,8 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total SKUs", total_skus)
-    k2.metric("🔴 Reorder Now", now_count)
-    k3.metric("🟡 Reorder Soon", soon_count)
+    k2.metric("Reorder Now", now_count)
+    k3.metric("Reorder Soon", soon_count)
     k4.metric("Inventory Value", f"${total_inv_value:,.0f}")
 
     st.divider()
@@ -551,13 +552,21 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         st.success("Nothing needs reordering right now.")
     else:
         for _, r in urgent.iterrows():
-            icon = "🔴" if r["status"] == "reorder_now" else "🟡"
-            cols = st.columns([1, 1, 5, 1, 1, 1])
-            cols[0].markdown(f"### {icon}")
+            status_label = "Reorder Now" if r["status"] == "reorder_now" else "Reorder Soon"
+            status_color = STATUS_COLORS.get(r["status"], "#888")
+            cols = st.columns([1, 5, 2, 1, 1, 1])
             if r.get("image_url"):
-                cols[1].image(r["image_url"], width=50)
-            cols[2].markdown(
+                cols[0].image(r["image_url"], width=50)
+            cols[1].markdown(
                 f"**{r['sku']}**  \n<span style='color:#666;font-size:12px;'>{r['name']}</span>",
+                unsafe_allow_html=True,
+            )
+            cols[2].markdown(
+                f"<div style='padding-top:14px;'>"
+                f"<span style='display:inline-block;width:8px;height:8px;border-radius:50%;"
+                f"background:{status_color};margin-right:6px;vertical-align:middle;'></span>"
+                f"<span style='font-size:13px;color:#222;vertical-align:middle;'>{status_label}</span>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
             total = int(r["on_hand_clinic"]) + int(r["on_hand_wsa"])
@@ -570,7 +579,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
 
 def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
-    st.header("Reorder Dashboard")
+    st.header("Reorder Alerts")
 
     if recs.empty:
         st.info("No products loaded yet. Run `seed_products.py` first.")
@@ -1123,8 +1132,10 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
     _supabase_edit_link("products")
 
 
-if page == "Reorder Dashboard":
+if page == "Overview":
     render_dashboard(recs, data)
+elif page == "Reorder Alerts":
+    render_reorder_alerts(recs, data)
 elif page == "Forecast Detail":
     render_forecast_detail(recs, data)
 elif page == "Purchase Log":
