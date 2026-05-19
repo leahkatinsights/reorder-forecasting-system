@@ -440,17 +440,17 @@ def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6
     The HTML is intentionally NOT indented — Streamlit's CommonMark parser would otherwise
     treat 4-space-indented HTML as a code block.
     """
-    sub_html = f'<div style="font-size:11px;color:#888;margin-top:6px;">{sub}</div>' if sub else ""
+    sub_html = (
+        f'<div style="font-size:11px;color:#888;margin-top:4px;">{sub}</div>'
+        if sub else '<div style="font-size:11px;color:transparent;margin-top:4px;">.</div>'
+    )
     return (
-        f'<div style="background:{bg};border-radius:10px;padding:18px 20px;min-height:110px;'
-        f'display:flex;flex-direction:column;justify-content:space-between;">'
-        f'<div style="font-size:10.5px;font-weight:700;letter-spacing:0.10em;'
-        f'text-transform:uppercase;color:#6b6b73;">{label}</div>'
-        f'<div>'
-        f'<div style="font-size:28px;font-weight:900;color:#111;line-height:1.05;'
+        f'<div style="background:{bg};border-radius:10px;padding:14px 16px;">'
+        f'<div style="font-size:10px;font-weight:700;letter-spacing:0.10em;'
+        f'text-transform:uppercase;color:#6b6b73;margin-bottom:8px;">{label}</div>'
+        f'<div style="font-size:24px;font-weight:900;color:#111;line-height:1.1;'
         f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;\">{value}</div>"
         f'{sub_html}'
-        f'</div>'
         f'</div>'
     )
 
@@ -560,55 +560,53 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     has_revenue = (not sales.empty) and ("revenue" in sales.columns)
 
     # ----------------------------------------------------------------
-    # FILTER BAR
-    # Row 1: date range (wide) + exclude-high toggle
-    # Row 2: category | vendor | product
+    # TOP SECTION: filters on the left, KPI cards on the right
     # ----------------------------------------------------------------
-    top_row = st.columns([4, 2])
-    with top_row[0]:
-        range_start, range_end = _date_range_picker(key_prefix="overview", default_days=90)
-    range_label = f"{range_start.strftime('%b %d, %Y')} – {range_end.strftime('%b %d, %Y')}"
-    with top_row[1]:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        exclude_high = st.toggle(
-            "Exclude products over $1,000",
-            value=False,
-            key="ov_exclude_high",
-        )
-
     vendors_df = data.get("vendors", pd.DataFrame())
     vendor_options = vendors_df["id"].tolist() if not vendors_df.empty else []
     vendor_names = vendors_df.set_index("id")["name"].to_dict() if not vendors_df.empty else {}
     name_by_sku = recs.set_index("sku")["name"].to_dict()
     all_categories = sorted([c for c in recs["category"].dropna().unique()])
 
-    fr = st.columns(3)
-    with fr[0]:
-        selected_cats = st.multiselect(
-            "Category",
-            all_categories,
-            default=[],
-            placeholder="All categories",
-            key="ov_cat",
+    top_left, top_right = st.columns([5, 4])
+
+    with top_left:
+        range_start, range_end = _date_range_picker(key_prefix="overview", default_days=90)
+        exclude_high = st.toggle(
+            "Exclude products over $1,000",
+            value=False,
+            key="ov_exclude_high",
         )
-    with fr[1]:
-        selected_vendor_ids = st.multiselect(
-            "Vendor",
-            vendor_options,
-            default=[],
-            format_func=lambda v: vendor_names.get(v, str(v)),
-            placeholder="All vendors",
-            key="ov_vendor",
-        )
-    with fr[2]:
-        selected_skus = st.multiselect(
-            "Product",
-            sorted(recs["sku"].tolist()),
-            default=[],
-            format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
-            placeholder="All products",
-            key="ov_sku",
-        )
+
+        fr = st.columns(3)
+        with fr[0]:
+            selected_cats = st.multiselect(
+                "Category",
+                all_categories,
+                default=[],
+                placeholder="All",
+                key="ov_cat",
+            )
+        with fr[1]:
+            selected_vendor_ids = st.multiselect(
+                "Vendor",
+                vendor_options,
+                default=[],
+                format_func=lambda v: vendor_names.get(v, str(v)),
+                placeholder="All",
+                key="ov_vendor",
+            )
+        with fr[2]:
+            selected_skus = st.multiselect(
+                "Product",
+                sorted(recs["sku"].tolist()),
+                default=[],
+                format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+                placeholder="All",
+                key="ov_sku",
+            )
+
+    range_label = f"{range_start.strftime('%b %d, %Y')} – {range_end.strftime('%b %d, %Y')}"
 
     # ----------------------------------------------------------------
     # APPLY FILTERS
@@ -637,6 +635,30 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         filt_sales = pd.DataFrame()
         excluded_skus = set()
 
+    # ----------------------------------------------------------------
+    # KPI CARDS (rendered in top_right column, 3x2 grid)
+    # ----------------------------------------------------------------
+    total_revenue = float(filt_sales["revenue"].sum()) if not filt_sales.empty else 0.0
+    total_units = int(filt_sales["units"].sum()) if not filt_sales.empty else 0
+    days_in_range = max(1, (range_end - range_start).days + 1)
+    avg_daily_rev = total_revenue / days_in_range
+    now_count = int((filt_recs["status"] == "reorder_now").sum())
+    soon_count = int((filt_recs["status"] == "reorder_soon").sum())
+
+    with top_right:
+        r1 = st.columns(3, gap="small")
+        r1[0].markdown(_kpi_card("Revenue",       f"${total_revenue:,.0f}", sub=range_label), unsafe_allow_html=True)
+        r1[1].markdown(_kpi_card("Units sold",    f"{total_units:,}",       sub=range_label), unsafe_allow_html=True)
+        r1[2].markdown(_kpi_card("Avg daily $",   f"${avg_daily_rev:,.0f}", sub=range_label), unsafe_allow_html=True)
+        st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+        r2 = st.columns(3, gap="small")
+        r2[0].markdown(_kpi_card("SKUs in scope", f"{len(filt_recs):,}",    sub="filtered"),  unsafe_allow_html=True)
+        r2[1].markdown(_kpi_card("Reorder Now",   f"{now_count:,}",         sub="current"),   unsafe_allow_html=True)
+        r2[2].markdown(_kpi_card("Reorder Soon",  f"{soon_count:,}",        sub="current"),   unsafe_allow_html=True)
+
+    if exclude_high and excluded_skus:
+        st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
+
     st.divider()
 
     # ----------------------------------------------------------------
@@ -657,29 +679,6 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             unsafe_allow_html=True,
         )
         st.divider()
-
-    # ----------------------------------------------------------------
-    # KPI STRIP
-    # ----------------------------------------------------------------
-    total_revenue = float(filt_sales["revenue"].sum()) if not filt_sales.empty else 0.0
-    total_units = int(filt_sales["units"].sum()) if not filt_sales.empty else 0
-    days_in_range = max(1, (range_end - range_start).days + 1)
-    avg_daily_rev = total_revenue / days_in_range
-    now_count = int((filt_recs["status"] == "reorder_now").sum())
-    soon_count = int((filt_recs["status"] == "reorder_soon").sum())
-
-    k = st.columns(6)
-    k[0].markdown(_kpi_card("SKUs in scope", f"{len(filt_recs):,}"), unsafe_allow_html=True)
-    k[1].markdown(_kpi_card("Revenue",       f"${total_revenue:,.0f}", sub=range_label), unsafe_allow_html=True)
-    k[2].markdown(_kpi_card("Units sold",    f"{total_units:,}",       sub=range_label), unsafe_allow_html=True)
-    k[3].markdown(_kpi_card("Avg daily $",   f"${avg_daily_rev:,.0f}", sub=range_label), unsafe_allow_html=True)
-    k[4].markdown(_kpi_card("Reorder Now",   f"{now_count:,}",         sub="current"),   unsafe_allow_html=True)
-    k[5].markdown(_kpi_card("Reorder Soon",  f"{soon_count:,}",        sub="current"),   unsafe_allow_html=True)
-
-    if exclude_high and excluded_skus:
-        st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
-
-    st.divider()
 
     # ----------------------------------------------------------------
     # SECTION: Sales Trends (Revenue + Units side by side)
@@ -730,13 +729,13 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             top["revenue"] = top["revenue"].round(2)
             top["avg_price"] = (top["revenue"] / top["units"].clip(lower=1)).round(2)
             disp = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
-            disp.columns = ["", "SKU", "Product", "Units", "Avg $", "Revenue"]
+            disp.columns = ["Image", "SKU", "Product", "Units", "Avg $", "Revenue"]
             st.dataframe(
                 disp,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "": st.column_config.ImageColumn("", width="small"),
+                    "Image": st.column_config.ImageColumn("Image", width="small"),
                     "Avg $": st.column_config.NumberColumn(format="$%.2f"),
                     "Revenue": st.column_config.NumberColumn(format="$%.0f"),
                 },
@@ -759,18 +758,37 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             if cat_rev.empty:
                 st.info("No category data.")
             else:
+                cat_sel = alt.selection_point(fields=["category"], on="click", name="cat_click")
                 bar_cat = (
                     alt.Chart(cat_rev)
-                    .mark_bar()
+                    .mark_bar(cursor="pointer")
                     .encode(
                         y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
                         x=alt.X("revenue:Q", axis=alt.Axis(title=None, format="$,.0f")),
                         color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                        opacity=alt.condition(cat_sel, alt.value(1.0), alt.value(0.55)),
                         tooltip=["category:N", alt.Tooltip("revenue:Q", format="$,.0f")],
                     )
+                    .add_params(cat_sel)
                     .properties(height=300)
                 )
-                st.altair_chart(bar_cat, use_container_width=True)
+                cat_event = st.altair_chart(
+                    bar_cat,
+                    use_container_width=True,
+                    on_select="rerun",
+                    key="ov_cat_bar_chart",
+                )
+                # Click → update the Category multiselect, which the rest of the dashboard already reacts to
+                if cat_event and getattr(cat_event, "selection", None):
+                    clicked_data = cat_event.selection.get("cat_click", [])
+                    if isinstance(clicked_data, list) and clicked_data:
+                        clicked_cats = [
+                            c.get("category") for c in clicked_data if isinstance(c, dict) and c.get("category")
+                        ]
+                        if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
+                            st.session_state["ov_cat"] = clicked_cats
+                            st.rerun()
+                st.caption("Click a bar to drill into that category.")
 
     st.divider()
 
@@ -1353,7 +1371,7 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
         on_select="rerun",
         selection_mode="multi-row" if st.session_state.ap_bulk_mode else "single-row",
         column_config={
-            "image_url": st.column_config.ImageColumn("", width="small"),
+            "image_url": st.column_config.ImageColumn("Image", width="small"),
         },
     )
 
