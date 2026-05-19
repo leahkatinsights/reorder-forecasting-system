@@ -1,4 +1,4 @@
-"""Lumati Repurchase System — Streamlit dashboard entrypoint."""
+"""Lumati Repurchase System · Streamlit dashboard entrypoint."""
 
 from __future__ import annotations
 
@@ -390,11 +390,11 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
         vendor_name = None
         if vendors is not None and pd.notna(r["vendor_id"]) and r["vendor_id"] in vendors.index:
             vendor_name = vendors.loc[r["vendor_id"], "name"]
-        vendor_str = vendor_name or "—"
+        vendor_str = vendor_name or "-"
         cost = r.get("recommended_cost")
-        cost_str = f"${cost:,.2f}" if pd.notna(cost) else "—"
+        cost_str = f"${cost:,.2f}" if pd.notna(cost) else "-"
         velocity = r["daily_velocity"]
-        velocity_str = f"{velocity:.2f}" if pd.notna(velocity) else "—"
+        velocity_str = f"{velocity:.2f}" if pd.notna(velocity) else "-"
 
         detail_cols = st.columns(_ROW_COL_WIDTHS)
         detail_cols[1].markdown(
@@ -455,7 +455,7 @@ def _fmt_compact(n: float, prefix: str = "") -> str:
 def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6", large: bool = False) -> str:
     """Render a KPI as a styled card. Returns HTML string for st.markdown(unsafe_allow_html=True).
 
-    The HTML is intentionally NOT indented — Streamlit's CommonMark parser would otherwise
+    The HTML is intentionally NOT indented · Streamlit's CommonMark parser would otherwise
     treat 4-space-indented HTML as a code block.
     Font sizes use clamp() so text scales smoothly when the card is narrow.
     Pass `large=True` for a hero/featured card with a much bigger value.
@@ -583,6 +583,11 @@ def _hover_line_chart(
 def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     st.header("Overview")
 
+    # Apply any pending state changes from a previous-run click event,
+    # BEFORE the multiselect widget with the same key is instantiated.
+    if "ov_cat_pending" in st.session_state:
+        st.session_state["ov_cat"] = st.session_state.pop("ov_cat_pending")
+
     if recs.empty:
         st.info("No products loaded yet. Run `seed_products.py` first.")
         return
@@ -632,7 +637,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                 "Product",
                 sorted(recs["sku"].tolist()),
                 default=[],
-                format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+                format_func=lambda s: f"{s} · {name_by_sku.get(s, '')}",
                 placeholder="All",
                 key="ov_sku",
             )
@@ -789,7 +794,8 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                 if isinstance(clicked, list) and clicked:
                     clicked_cats = [c.get("category") for c in clicked if isinstance(c, dict) and c.get("category")]
                     if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
-                        st.session_state["ov_cat"] = clicked_cats
+                        # Write to a "pending" key — applied at top of next run before widget renders
+                        st.session_state["ov_cat_pending"] = clicked_cats
                         st.rerun()
             st.caption("Click a category segment above to filter the dashboard.")
 
@@ -845,7 +851,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             .sort_values("revenue", ascending=False)
             .head(15)
         )
-        top["name"] = top["sku"].map(name_by_sku).fillna("—")
+        top["name"] = top["sku"].map(name_by_sku).fillna("-")
         image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
         top["image_url"] = top["sku"].map(image_by_sku).fillna("")
         top["revenue"] = top["revenue"].round(2)
@@ -869,7 +875,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     # SECTION: Current Inventory Value by Category (full width)
     # ----------------------------------------------------------------
     st.markdown("##### Current Inventory Value by Category")
-    st.caption("Current snapshot — does not change with date range")
+    st.caption("Current snapshot · does not change with date range")
     recs_inv = filt_recs.copy()
     recs_inv["inv_value"] = recs_inv["unit_cost"] * (recs_inv["on_hand_clinic"] + recs_inv["on_hand_wsa"])
     cat_value = (
@@ -879,7 +885,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         .sort_values("inv_value", ascending=True)
     )
     if cat_value.empty or cat_value["inv_value"].sum() == 0:
-        st.info("No unit_cost data yet — fill in the products table.")
+        st.info("No unit_cost data yet · fill in the products table.")
     else:
         bar_inv = (
             alt.Chart(cat_value)
@@ -900,7 +906,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     # SECTION: Top 10 Most Urgent (always current state, ignores filters)
     # ----------------------------------------------------------------
     st.markdown("##### Top 10 Most Urgent")
-    st.caption("Current state — ignores filters above")
+    st.caption("Current state · ignores filters above")
     urgent = recs[recs["status"].isin(["reorder_now", "reorder_soon"])].copy()
     urgent = urgent.sort_values(["status", "days_of_supply"], ascending=[True, True]).head(10)
 
@@ -970,7 +976,7 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     reorder = finance.reorder_needed(recs)
     dead_value, dead_count = finance.dead_stock_value(recs)
 
-    inv_sub = f"{inv_excluded} excluded — no cost" if inv_excluded else None
+    inv_sub = f"{inv_excluded} excluded · no cost" if inv_excluded else None
     reorder_sub = f"Now ${reorder['now']:,.0f} · Soon ${reorder['soon']:,.0f}"
     dead_sub = f"{dead_count} SKUs" if dead_count else None
 
@@ -1049,7 +1055,7 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     sku = st.selectbox(
         "Pick a SKU",
         sku_options,
-        format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+        format_func=lambda s: f"{s} · {name_by_sku.get(s, '')}",
         key="fd_sku_picker",
     )
     row = recs[recs["sku"] == sku].iloc[0]
@@ -1087,8 +1093,8 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         "reorder_soon":         ("Reorder Soon",                 "#FFF3D6", "#7A5A0E"),
         "healthy":              ("Healthy",                      "#E4F4E4", "#1F5A2A"),
         "slow":                 ("Slow Mover",                   "#F0F0F0", "#444444"),
-        "dead":                 ("Inactive — No Recent Sales",   "#F0F0F0", "#444444"),
-        "insufficient_history": ("New SKU — Limited History",    "#F0F0F0", "#444444"),
+        "dead":                 ("Inactive · No Recent Sales",   "#F0F0F0", "#444444"),
+        "insufficient_history": ("New SKU · Limited History",    "#F0F0F0", "#444444"),
         "manual_override":      ("Manual Override",              "#F0F0F0", "#444444"),
     }
     label, bg, fg = STATUS_DISPLAY.get(row["status"], (row["status"], "#F0F0F0", "#444444"))
@@ -1205,7 +1211,7 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
             sku = st.selectbox(
                 "SKU",
                 sku_options,
-                format_func=lambda s: f"{s} — {name_by_sku.get(s, '')}",
+                format_func=lambda s: f"{s} · {name_by_sku.get(s, '')}",
             )
 
             vendor_options = [None] + (data["vendors"]["id"].tolist() if not data["vendors"].empty else [])
@@ -1220,7 +1226,7 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
 
             c3, c4 = st.columns(2)
             quantity = c3.number_input("Quantity", min_value=1, value=1, step=1)
-            unit_cost = c4.number_input("Unit cost ($) — optional", min_value=0.0, value=0.0, step=0.01)
+            unit_cost = c4.number_input("Unit cost ($) · optional", min_value=0.0, value=0.0, step=0.01)
             notes = st.text_area("Notes (optional)", "")
 
             submitted = st.form_submit_button("Log purchase", type="primary")
@@ -1260,18 +1266,18 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
 
     # Join readable names
     vmap = data["vendors"].set_index("id")["name"].to_dict() if not data["vendors"].empty else {}
-    log["vendor"] = log["vendor_id"].map(vmap).fillna("—")
+    log["vendor"] = log["vendor_id"].map(vmap).fillna("-")
     nmap = recs.set_index("sku")["name"].to_dict()
-    log["product"] = log["sku"].map(nmap).fillna("—")
+    log["product"] = log["sku"].map(nmap).fillna("-")
 
     display_cols = [
         "ordered_at", "sku", "product", "vendor",
         "quantity", "unit_cost", "expected_arrival", "status", "notes",
     ]
     display = log[display_cols].copy()
-    display["unit_cost"] = display["unit_cost"].apply(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
-    display["expected_arrival"] = display["expected_arrival"].fillna("—")
-    display["notes"] = display["notes"].fillna("—")
+    display["unit_cost"] = display["unit_cost"].apply(lambda v: f"${v:,.2f}" if pd.notna(v) else "-")
+    display["expected_arrival"] = display["expected_arrival"].fillna("-")
+    display["notes"] = display["notes"].fillna("-")
     st.dataframe(display, hide_index=True, use_container_width=True)
 
     st.caption(f"{len(display)} entries shown")
@@ -1297,12 +1303,12 @@ def render_vendors(recs: pd.DataFrame, data: dict) -> None:
         sku_count = int(skus_per_vendor.get(v["id"], 0))
         with st.expander(f"{v['name']}  •  {sku_count} SKUs"):
             c1, c2 = st.columns(2)
-            c1.markdown(f"**Contact:** {v.get('contact_name') or '—'}  \n"
-                        f"**Email:** {v.get('contact_email') or '—'}  \n"
-                        f"**Phone:** {v.get('contact_phone') or '—'}")
-            c2.markdown(f"**Payment terms:** {v.get('payment_terms') or '—'}  \n"
+            c1.markdown(f"**Contact:** {v.get('contact_name') or '-'}  \n"
+                        f"**Email:** {v.get('contact_email') or '-'}  \n"
+                        f"**Phone:** {v.get('contact_phone') or '-'}")
+            c2.markdown(f"**Payment terms:** {v.get('payment_terms') or '-'}  \n"
                         f"**Currency:** {v.get('currency') or 'USD'}  \n"
-                        f"**Website:** {v.get('website') or '—'}")
+                        f"**Website:** {v.get('website') or '-'}")
             if v.get("notes"):
                 st.markdown(f"**Notes:** {v['notes']}")
 
@@ -1319,7 +1325,7 @@ def _supabase_edit_link(table: str) -> None:
     project_url = os.environ.get("SUPABASE_URL", "")
     if not project_url:
         return
-    # Project URL is like https://abc123.supabase.co — extract the project ref
+    # Project URL is like https://abc123.supabase.co · extract the project ref
     ref = project_url.replace("https://", "").split(".")[0]
     edit_url = f"https://supabase.com/dashboard/project/{ref}/editor"
     st.link_button(f"Edit {table} →", edit_url)
@@ -1450,7 +1456,7 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
                 vendor_name_by_id = vendors_df.set_index("id")["name"].to_dict() if not vendors_df.empty else {}
                 unique_vendors = selected_skus_df["vendor_id"].dropna().unique().tolist()
                 if len(unique_vendors) > 1:
-                    st.info(f"Selected SKUs span {len(unique_vendors)} vendors — each line uses its own vendor.")
+                    st.info(f"Selected SKUs span {len(unique_vendors)} vendors · each line uses its own vendor.")
                 elif len(unique_vendors) == 0:
                     st.warning("None of the selected SKUs have a vendor set. The PO will be logged with no vendor attached.")
 
@@ -1522,7 +1528,7 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
                         for err in errors:
                             st.error(err)
                     if inserted:
-                        st.success(f"Logged {inserted} purchase order line(s) — visible in Purchase Log.")
+                        st.success(f"Logged {inserted} purchase order line(s) · visible in Purchase Log.")
                         st.rerun()
 
     _supabase_edit_link("products")

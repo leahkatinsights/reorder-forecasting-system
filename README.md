@@ -13,12 +13,12 @@ Streamlit dashboard that surfaces reorder alerts for the lumati.life Shopify sto
 
 ## Structure
 
-- `app.py` — Streamlit entry point and page routing
-- `lib/shopify.py` — Shopify Admin API client
-- `lib/supabase_io.py` — Supabase reads/writes
-- `lib/forecast.py` — Weighted rolling average velocity model
-- `lib/reorder.py` — Status logic and recommended quantity
-- `lib/email_draft.py` — PO email body template
-- `schema.sql` — Supabase Postgres schema
-- `seed_products.py` — One-time SKU seeding from Shopify
-- `tests/` — Unit tests for forecast and reorder
+- `app.py` · Streamlit entry point and page routing
+- `lib/shopify.py` · Shopify Admin API client
+- `lib/supabase_io.py` · Supabase reads/writes
+- `lib/forecast.py` · Weighted rolling average velocity model
+- `lib/reorder.py` · Status logic and recommended quantity
+- `lib/email_draft.py` · PO email body template
+- `schema.sql` · Supabase Postgres schema
+- `seed_products.py` · One-time SKU seeding from Shopify
+- `tests/` · Unit tests for forecast and reorder

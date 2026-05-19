@@ -1,4 +1,4 @@
-"""Shopify Admin API client — products, inventory, and orders.
+"""Shopify Admin API client · products, inventory, and orders.
 
 We use the REST Admin API directly (no SDK) for transparency and minimal deps.
 All functions return clean pandas DataFrames.
@@ -120,7 +120,7 @@ def fetch_products() -> pd.DataFrame:
         df["on_hand"] = pd.Series(dtype=int)
         return df
 
-    # Inventory levels, partitioned by location (chunked — Shopify caps at 50 ids per request)
+    # Inventory levels, partitioned by location (chunked · Shopify caps at 50 ids per request)
     on_hand_clinic: dict[int, int] = {}
     on_hand_wsa: dict[int, int] = {}
     for chunk_start in range(0, len(inventory_item_ids), 50):

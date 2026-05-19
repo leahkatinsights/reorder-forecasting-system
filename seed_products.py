@@ -3,7 +3,7 @@
 Run with the venv active:
     python seed_products.py
 
-Idempotent — re-running won't duplicate or overwrite existing rows.
+Idempotent · re-running won't duplicate or overwrite existing rows.
 """
 
 from dotenv import load_dotenv
