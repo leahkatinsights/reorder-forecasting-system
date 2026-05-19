@@ -462,7 +462,7 @@ def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6
     sub_html = (
         f'<div style="font-size:clamp(9px,0.7vw,11px);color:#888;margin-top:4px;'
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{sub}</div>'
-        if sub else '<div style="font-size:clamp(9px,0.7vw,11px);color:transparent;margin-top:4px;">.</div>'
+        if sub else ''
     )
     return (
         f'<div style="background:{bg};border-radius:10px;padding:14px 16px;min-width:0;">'
@@ -669,14 +669,14 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     with top_right:
         r1 = st.columns(3, gap="small")
-        r1[0].markdown(_kpi_card("Revenue",       _fmt_compact(total_revenue, "$"), sub=range_label), unsafe_allow_html=True)
-        r1[1].markdown(_kpi_card("Units sold",    _fmt_compact(total_units),        sub=range_label), unsafe_allow_html=True)
-        r1[2].markdown(_kpi_card("Avg daily $",   _fmt_compact(avg_daily_rev, "$"), sub=range_label), unsafe_allow_html=True)
+        r1[0].markdown(_kpi_card("Revenue",       _fmt_compact(total_revenue, "$")), unsafe_allow_html=True)
+        r1[1].markdown(_kpi_card("Units sold",    _fmt_compact(total_units)),        unsafe_allow_html=True)
+        r1[2].markdown(_kpi_card("Avg daily $",   _fmt_compact(avg_daily_rev, "$")), unsafe_allow_html=True)
         st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
         r2 = st.columns(3, gap="small")
-        r2[0].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs)),     sub="filtered"),  unsafe_allow_html=True)
-        r2[1].markdown(_kpi_card("Reorder Now",   _fmt_compact(now_count),          sub="current"),   unsafe_allow_html=True)
-        r2[2].markdown(_kpi_card("Reorder Soon",  _fmt_compact(soon_count),         sub="current"),   unsafe_allow_html=True)
+        r2[0].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs))),     unsafe_allow_html=True)
+        r2[1].markdown(_kpi_card("Reorder Now",   _fmt_compact(now_count)),          unsafe_allow_html=True)
+        r2[2].markdown(_kpi_card("Reorder Soon",  _fmt_compact(soon_count)),         unsafe_allow_html=True)
 
     if exclude_high and excluded_skus:
         st.caption(f"Excluding {len(excluded_skus)} SKU(s) with avg sale price over $1,000")
