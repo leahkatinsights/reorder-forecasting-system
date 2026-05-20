@@ -21,7 +21,7 @@ try:
 except Exception:
     pass
 
-from lib import finance, shopify, supabase_io  # noqa: E402
+from lib import finance, shopify, square, supabase_io  # noqa: E402
 from lib.forecast import calculate_velocity, history_metadata  # noqa: E402
 from lib.reorder import ReorderRecommendation, Settings, compute_recommendation  # noqa: E402
 
@@ -214,7 +214,26 @@ def load_all_data() -> dict[str, Any]:
     purchase_log = supabase_io.fetch_purchase_log(client)
 
     shop_products = shopify.fetch_products()      # sku, product_name, on_hand, ...
-    sales = shopify.fetch_daily_sales(days_back=settings_window(settings))
+
+    # Combined sales: Shopify + Square (each tagged with `source` column)
+    days = settings_window(settings)
+    shopify_sales = shopify.fetch_daily_sales(days_back=days)
+    if not shopify_sales.empty:
+        shopify_sales["source"] = "shopify"
+    try:
+        square_sales = square.fetch_daily_sales(days_back=days)
+    except Exception:
+        square_sales = pd.DataFrame(columns=["sku", "date", "units", "revenue"])
+    if not square_sales.empty:
+        square_sales["source"] = "square"
+
+    if shopify_sales.empty and square_sales.empty:
+        sales = pd.DataFrame(columns=["sku", "date", "units", "revenue", "source"])
+    else:
+        sales = pd.concat(
+            [df for df in (shopify_sales, square_sales) if not df.empty],
+            ignore_index=True,
+        )
 
     return {
         "products": products,
@@ -653,11 +672,21 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     with top_left:
         range_start, range_end = _date_range_picker(key_prefix="overview", default_days=90)
-        exclude_high = st.toggle(
-            "Exclude products over $1,000",
-            value=False,
-            key="ov_exclude_high",
-        )
+        source_col, toggle_col = st.columns([3, 3])
+        with source_col:
+            source = st.radio(
+                "Sales source",
+                ["Both", "Shopify", "Square"],
+                horizontal=True,
+                key="ov_source",
+            )
+        with toggle_col:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            exclude_high = st.toggle(
+                "Exclude products over $1,000",
+                value=False,
+                key="ov_exclude_high",
+            )
 
         fr = st.columns(3)
         with fr[0]:
@@ -702,6 +731,9 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
 
     if has_revenue:
         filt_sales = sales[(sales["date"] >= range_start) & (sales["date"] <= range_end)].copy()
+        # Source filter (Shopify / Square / Both)
+        if "source" in filt_sales.columns and source != "Both":
+            filt_sales = filt_sales[filt_sales["source"] == source.lower()]
         # Restrict sales to SKUs that pass the rec-side filters
         if selected_cats or selected_vendor_ids or selected_skus:
             allowed = set(filt_recs["sku"].tolist())
