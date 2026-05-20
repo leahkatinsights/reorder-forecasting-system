@@ -30,6 +30,7 @@ STATUS_VALUES = {
     "dead",
     "insufficient_history",
     "manual_override",
+    "on_order",
 }
 
 

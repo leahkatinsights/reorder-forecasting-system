@@ -325,6 +325,13 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
 
     today = datetime.now().date()
 
+    # SKUs with an outstanding purchase order (placed or shipped — not received/cancelled)
+    purchase_log = data.get("purchase_log", pd.DataFrame())
+    on_order_skus: set[str] = set()
+    if not purchase_log.empty and "status" in purchase_log.columns and "sku" in purchase_log.columns:
+        outstanding = purchase_log[purchase_log["status"].isin(["placed", "shipped"])]
+        on_order_skus = set(outstanding["sku"].dropna().tolist())
+
     merge_cols = ["sku", "on_hand", "on_hand_clinic", "on_hand_wsa", "product_name"]
     if "image_url" in shop.columns:
         merge_cols.append("image_url")
@@ -357,6 +364,12 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
             settings=settings,
         )
 
+        # Override reorder_now/reorder_soon with "on_order" if there's an outstanding PO.
+        # Healthy/slow/dead/etc. are unaffected — they don't need a reorder regardless.
+        status = rec.status
+        if sku in on_order_skus and status in ("reorder_now", "reorder_soon"):
+            status = "on_order"
+
         rows.append({
             "sku": sku,
             "name": p.get("name") or p["product_name"],
@@ -370,7 +383,7 @@ def build_recommendations(data: dict[str, Any]) -> pd.DataFrame:
             "on_hand_wsa": int(p["on_hand_wsa"]),
             "daily_velocity": rec.daily_velocity,
             "days_of_supply": rec.days_of_supply,
-            "status": rec.status,
+            "status": status,
             "recommended_qty": rec.recommended_qty,
         })
 
@@ -539,6 +552,7 @@ STATUS_COLORS = {
     "dead":                 "#6B6B70",
     "insufficient_history": "#C0C0C5",
     "manual_override":      "#888888",
+    "on_order":             "#6FA3D4",  # calm blue — outstanding PO is being handled
 }
 
 # Soft pastel palette used across dashboard charts
@@ -627,6 +641,8 @@ def _kpi_card(
     secondary_label: str | None = None,
     secondary_value: str | None = None,
     delta_pct: float | None = None,
+    corner_text: str | None = None,
+    secondary_corner_text: str | None = None,
 ) -> str:
     """Render a KPI as a styled card. Returns HTML string for st.markdown(unsafe_allow_html=True).
 
@@ -653,15 +669,39 @@ def _kpi_card(
         secondary_label_size = "clamp(8px,0.6vw,10px)"
         secondary_value_size = "clamp(11px,1.1vw,15px)"
 
+    # Header row: label left-aligned, optional corner text top-right (e.g., margin %)
+    corner_html = (
+        f'<span style="font-size:clamp(9px,0.7vw,11px);font-weight:400;color:#888;'
+        f'letter-spacing:0.02em;">{corner_text}</span>'
+        if corner_text else ''
+    )
+    label_row_html = (
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">'
+        f'<span style="font-size:{label_size};font-weight:700;letter-spacing:0.08em;'
+        f'text-transform:uppercase;color:#6b6b73;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{label}</span>'
+        f'{corner_html}'
+        f'</div>'
+    )
+
     secondary_html = ""
     if secondary_label and secondary_value:
+        sec_corner_html = (
+            f'<span style="font-size:clamp(9px,0.7vw,11px);font-weight:400;color:#888;'
+            f'letter-spacing:0.02em;">{secondary_corner_text}</span>'
+            if secondary_corner_text else ''
+        )
+        # Top-right corner of the secondary section (so it pairs with the secondary value/label)
         secondary_html = (
-            f'<div style="margin-top:10px;padding-top:8px;border-top:1px solid #E2E2E5;'
-            f'display:flex;align-items:baseline;gap:8px;white-space:nowrap;overflow:hidden;">'
+            f'<div style="margin-top:10px;padding-top:8px;border-top:1px solid #E2E2E5;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
             f'<span style="font-size:{secondary_label_size};font-weight:700;letter-spacing:0.08em;'
             f'text-transform:uppercase;color:#6b6b73;">{secondary_label}</span>'
-            f'<span style="font-size:{secondary_value_size};font-weight:800;color:#111;'
-            f"font-family:'Inter',sans-serif;letter-spacing:-0.01em;\">{secondary_value}</span>"
+            f'{sec_corner_html}'
+            f'</div>'
+            f'<div style="font-size:{secondary_value_size};font-weight:800;color:#111;'
+            f"font-family:'Inter',sans-serif;letter-spacing:-0.01em;margin-top:2px;"
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{secondary_value}</div>'
             f'</div>'
         )
 
@@ -670,9 +710,7 @@ def _kpi_card(
 
     return (
         f'<div style="background:{bg};border-radius:10px;padding:{padding};min-width:0;">'
-        f'<div style="font-size:{label_size};font-weight:700;letter-spacing:0.08em;'
-        f'text-transform:uppercase;color:#6b6b73;margin-bottom:8px;'
-        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{label}</div>'
+        f'{label_row_html}'
         f'<div style="font-size:{value_size};font-weight:900;color:#111;line-height:1.05;'
         f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;"
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
@@ -921,21 +959,40 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     now_count = int((filt_recs["status"] == "reorder_now").sum())
     soon_count = int((filt_recs["status"] == "reorder_soon").sum())
 
-    # ---- Net revenue = gross - discounts - refunds (definition A) ----
-    adjustments = data.get("adjustments", pd.DataFrame())
-    total_discounts = 0.0
-    total_refunds = 0.0
-    if not adjustments.empty:
-        adj = adjustments[
-            (adjustments["date"] >= range_start) & (adjustments["date"] <= range_end)
-        ]
-        # Respect the source toggle
-        if "source" in adj.columns and source != "Both":
-            adj = adj[adj["source"] == source.lower()]
-        if not adj.empty:
-            total_discounts = float(adj["discounts"].sum())
-            total_refunds = float(adj["refunds"].sum())
-    net_revenue = max(0.0, total_revenue - total_discounts - total_refunds)
+    # ---- Net revenue (per-line, respects ALL filters including category) ----
+    # filt_sales has a `net_revenue` column populated per line item by fetch_daily_sales:
+    # Shopify net = gross - per-line discount allocations - per-line refunds
+    # Square net  = gross - per-line discount
+    if not filt_sales.empty and "net_revenue" in filt_sales.columns:
+        net_revenue = float(filt_sales["net_revenue"].sum())
+    else:
+        # Fallback to order-level adjustments only when per-line data unavailable
+        adjustments = data.get("adjustments", pd.DataFrame())
+        total_discounts = 0.0
+        total_refunds = 0.0
+        if not adjustments.empty:
+            adj = adjustments[
+                (adjustments["date"] >= range_start) & (adjustments["date"] <= range_end)
+            ]
+            if "source" in adj.columns and source != "Both":
+                adj = adj[adj["source"] == source.lower()]
+            if not adj.empty:
+                total_discounts = float(adj["discounts"].sum())
+                total_refunds = float(adj["refunds"].sum())
+        net_revenue = max(0.0, total_revenue - total_discounts - total_refunds)
+
+    # ---- Profit margin = (revenue - COGS) / revenue ----
+    # COGS = sum of (units * unit_cost) per line item, looked up from products table.
+    total_cogs = 0.0
+    if not filt_sales.empty:
+        cost_lookup = recs.set_index("sku")["unit_cost"].to_dict() if "unit_cost" in recs.columns else {}
+        cogs_series = filt_sales.apply(
+            lambda r: (r["units"] * cost_lookup.get(r["sku"], 0)) if cost_lookup.get(r["sku"]) is not None else 0,
+            axis=1,
+        )
+        total_cogs = float(cogs_series.sum())
+    gross_margin_pct = ((total_revenue - total_cogs) / total_revenue * 100) if total_revenue > 0 else None
+    net_margin_pct = ((net_revenue - total_cogs) / net_revenue * 100) if net_revenue > 0 else None
 
     # ---- Prior-period comparison (same length, immediately before current range) ----
     prior_end = range_start - pd.Timedelta(days=1)
@@ -966,16 +1023,24 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     units_delta = _pct(total_units, prior_units)
     avg_delta = _pct(avg_daily_rev, prior_avg_daily)
 
+    # Clean dollar values, margin lives in the top-right corner of each section
+    gross_display = _fmt_compact(total_revenue, "$")
+    net_value_display = _fmt_compact(net_revenue, "$")
+    gross_margin_text = f"{gross_margin_pct:.0f}% margin" if (gross_margin_pct is not None and total_cogs > 0) else None
+    net_margin_text = f"{net_margin_pct:.0f}% margin" if (net_margin_pct is not None and total_cogs > 0) else None
+
     with top_right:
-        # Hero Revenue card (full width, large) — Gross with Net as a sub-line + delta vs prior period
+        # Hero Revenue card: margin % in top-right of each section (gross + net)
         st.markdown(
             _kpi_card(
                 "Revenue",
-                _fmt_compact(total_revenue, "$"),
+                gross_display,
                 large=True,
                 secondary_label="Net",
-                secondary_value=_fmt_compact(net_revenue, "$"),
+                secondary_value=net_value_display,
                 delta_pct=rev_delta,
+                corner_text=gross_margin_text,
+                secondary_corner_text=net_margin_text,
             ),
             unsafe_allow_html=True,
         )
@@ -1435,6 +1500,7 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     STATUS_DISPLAY = {
         "reorder_now":          ("Reorder Now",                  "#FCE4E4", "#8A2A2A"),
         "reorder_soon":         ("Reorder Soon",                 "#FFF3D6", "#7A5A0E"),
+        "on_order":             ("On Order",                     "#DCE7F2", "#1E3A5F"),
         "healthy":              ("Healthy",                      "#E4F4E4", "#1F5A2A"),
         "slow":                 ("Slow Mover",                   "#F0F0F0", "#444444"),
         "dead":                 ("Inactive · No Recent Sales",   "#F0F0F0", "#444444"),
