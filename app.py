@@ -13,6 +13,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Mirror Streamlit Cloud secrets into os.environ for code that reads via os.environ.
+# Locally this is a no-op (st.secrets file doesn't exist; .env handles it).
+try:
+    for _key, _value in st.secrets.items():
+        os.environ.setdefault(_key, str(_value))
+except Exception:
+    pass
+
 from lib import finance, shopify, supabase_io  # noqa: E402
 from lib.forecast import calculate_velocity, history_metadata  # noqa: E402
 from lib.reorder import ReorderRecommendation, Settings, compute_recommendation  # noqa: E402
