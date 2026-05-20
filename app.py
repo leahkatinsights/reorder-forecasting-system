@@ -109,6 +109,12 @@ st.markdown(
     }
     /* Hide Streamlit's default top-right menu + deploy button */
     #MainMenu, [data-testid="stToolbar"], [data-testid="stDecoration"] { visibility: hidden; height: 0; }
+    /* Prevent button labels (like MTD / YTD / 30D) from wrapping in narrow columns */
+    .stButton > button p {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
     /* Reduce top padding so headers sit higher on every page */
     .block-container { padding-top: 1.5rem !important; }
 
@@ -548,6 +554,35 @@ PASTEL_PALETTE = [
 ]
 PASTEL_PEACH = "#FFB99D"
 PASTEL_BLUE = "#9CC5DF"
+PASTEL_PURPLE = "#D0BDE0"
+
+# Fixed category-to-color map. Keeps Hydrogen Equipment as light blue always.
+# Unknown categories fall back to the rest of PASTEL_PALETTE in deterministic order.
+CATEGORY_COLORS: dict[str, str] = {
+    "Hydrogen Equipment": "#A4C8E0",  # light blue (locked per user request)
+    "Supplement":         "#F5B9C9",  # soft pink
+    "Light Equipment":    "#F2D98D",  # light yellow
+    "Detect Test":        "#B5D8B5",  # light green
+}
+
+
+def _category_color_scale(categories_in_data) -> "alt.Scale":
+    """Build an Altair scale with consistent colors for known categories."""
+    seen_colors = set(CATEGORY_COLORS.values())
+    fallback = [c for c in PASTEL_PALETTE if c not in seen_colors]
+    domain: list[str] = []
+    range_colors: list[str] = []
+    fb_idx = 0
+    for cat in sorted(categories_in_data):
+        if not isinstance(cat, str):
+            continue
+        domain.append(cat)
+        if cat in CATEGORY_COLORS:
+            range_colors.append(CATEGORY_COLORS[cat])
+        else:
+            range_colors.append(fallback[fb_idx % len(fallback)])
+            fb_idx += 1
+    return alt.Scale(domain=domain, range=range_colors)
 
 
 def _fmt_compact(n: float, prefix: str = "") -> str:
@@ -658,18 +693,27 @@ def _date_range_picker(key_prefix: str = "overview", default_days: int = 90) -> 
     if cal_key not in st.session_state:
         st.session_state[cal_key] = (today - timedelta(days=default_days), today)
 
-    # Quick presets (chip-style buttons that update the calendar)
+    # Quick presets: rolling windows | to-date windows
+    _q_start_month = ((today.month - 1) // 3) * 3 + 1
     presets = [
         ("7D",  lambda: (today - timedelta(days=7),   today)),
         ("30D", lambda: (today - timedelta(days=30),  today)),
+        ("60D", lambda: (today - timedelta(days=60),  today)),
         ("90D", lambda: (today - timedelta(days=90),  today)),
-        ("6M",  lambda: (today - timedelta(days=180), today)),
-        ("1Y",  lambda: (today - timedelta(days=365), today)),
+        ("MTD", lambda: (_date(today.year, today.month, 1), today)),
+        ("QTD", lambda: (_date(today.year, _q_start_month, 1), today)),
         ("YTD", lambda: (_date(today.year, 1, 1),     today)),
     ]
-    chip_cols = st.columns(len(presets))
+    # 8 columns: 4 rolling, thin divider, 3 to-date
+    chip_cols = st.columns([1, 1, 1, 1, 0.18, 1, 1, 1])
+    btn_cols = [chip_cols[0], chip_cols[1], chip_cols[2], chip_cols[3],
+                chip_cols[5], chip_cols[6], chip_cols[7]]
+    chip_cols[4].markdown(
+        "<div style='border-left:1px solid #d4d4d8;height:32px;margin:4px auto 0;'></div>",
+        unsafe_allow_html=True,
+    )
     for i, (label, getter) in enumerate(presets):
-        if chip_cols[i].button(label, key=f"{key_prefix}_p_{label}", use_container_width=True):
+        if btn_cols[i].button(label, key=f"{key_prefix}_p_{label}", use_container_width=True):
             st.session_state[cal_key] = getter()
             st.rerun()
 
@@ -801,7 +845,6 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             selected_cats = st.multiselect(
                 "Category",
                 all_categories,
-                default=[],
                 placeholder="All",
                 key="ov_cat",
             )
@@ -809,7 +852,6 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             selected_vendor_ids = st.multiselect(
                 "Vendor",
                 vendor_options,
-                default=[],
                 format_func=lambda v: vendor_names.get(v, str(v)),
                 placeholder="All",
                 key="ov_vendor",
@@ -818,7 +860,6 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             selected_skus = st.multiselect(
                 "Product",
                 sorted(recs["sku"].tolist()),
-                default=[],
                 format_func=lambda s: f"{s} · {name_by_sku.get(s, '')}",
                 placeholder="All",
                 key="ov_sku",
@@ -842,18 +883,32 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         # Source filter (Shopify / Square / Both)
         if "source" in filt_sales.columns and source != "Both":
             filt_sales = filt_sales[filt_sales["source"] == source.lower()]
-        # Restrict sales to SKUs that pass the rec-side filters
-        if selected_cats or selected_vendor_ids or selected_skus:
-            allowed = set(filt_recs["sku"].tolist())
-            filt_sales = filt_sales[filt_sales["sku"].isin(allowed)]
+        # Restrict sales to SKUs that pass the rec-side filters (vendor/sku, EXCLUDING category for now)
+        if selected_vendor_ids or selected_skus:
+            recs_for_vs = recs.copy()
+            if selected_vendor_ids:
+                recs_for_vs = recs_for_vs[recs_for_vs["vendor_id"].isin(selected_vendor_ids)]
+            if selected_skus:
+                recs_for_vs = recs_for_vs[recs_for_vs["sku"].isin(selected_skus)]
+            filt_sales = filt_sales[filt_sales["sku"].isin(set(recs_for_vs["sku"].tolist()))]
         # Exclude high-ticket if requested
         if exclude_high and not filt_sales.empty:
             sku_tot = filt_sales.groupby("sku", as_index=False)[["units", "revenue"]].sum()
             sku_tot["avg"] = sku_tot["revenue"] / sku_tot["units"].clip(lower=1)
             excluded_skus = set(sku_tot.loc[sku_tot["avg"] > 1000, "sku"])
             filt_sales = filt_sales[~filt_sales["sku"].isin(excluded_skus)]
+
+        # filt_sales NOW reflects everything EXCEPT category filter — perfect for the
+        # proportional category bar so all categories stay clickable.
+        filt_sales_all_cats = filt_sales
+
+        # Apply the category filter to produce the final filt_sales used by line / top products / etc.
+        if selected_cats:
+            allowed_with_cat = set(filt_recs["sku"].tolist())
+            filt_sales = filt_sales[filt_sales["sku"].isin(allowed_with_cat)]
     else:
         filt_sales = pd.DataFrame()
+        filt_sales_all_cats = pd.DataFrame()
         excluded_skus = set()
 
     # ----------------------------------------------------------------
@@ -984,7 +1039,8 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         st.info("No sales data for the selected filters / range.")
     else:
         # ---- Proportional category map (clickable to filter) ----
-        sales_cat = filt_sales.merge(recs[["sku", "category"]], on="sku", how="left").dropna(subset=["category"])
+        # Use the version WITHOUT category filter so all categories stay in the bar
+        sales_cat = filt_sales_all_cats.merge(recs[["sku", "category"]], on="sku", how="left").dropna(subset=["category"])
         cat_rev = sales_cat.groupby("category", as_index=False)["revenue"].sum()
         if not cat_rev.empty and cat_rev["revenue"].sum() > 0:
             cat_rev["pct"] = (cat_rev["revenue"] / cat_rev["revenue"].sum() * 100).round(1)
@@ -1002,7 +1058,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                     y=alt.Y("_y:N", axis=None),
                     color=alt.Color(
                         "category:N",
-                        scale=alt.Scale(range=PASTEL_PALETTE),
+                        scale=_category_color_scale(cat_rev["category"].unique()),
                         legend=alt.Legend(
                             orient="bottom",
                             title=None,
@@ -1012,7 +1068,13 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                             labelFontWeight=600,
                         ),
                     ),
-                    opacity=alt.condition(cat_area_sel, alt.value(1.0), alt.value(0.45)),
+                    opacity=(
+                        alt.condition(
+                            alt.FieldOneOfPredicate(field="category", oneOf=list(selected_cats)),
+                            alt.value(1.0),
+                            alt.value(0.35),
+                        ) if selected_cats else alt.condition(cat_area_sel, alt.value(1.0), alt.value(0.45))
+                    ),
                     tooltip=[
                         alt.Tooltip("category:N", title="Category"),
                         alt.Tooltip("revenue:Q", title="Revenue", format="$,.0f"),
@@ -1031,13 +1093,24 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             )
             if area_event and getattr(area_event, "selection", None):
                 clicked = area_event.selection.get("area_cat_click", [])
-                if isinstance(clicked, list) and clicked:
-                    clicked_cats = [c.get("category") for c in clicked if isinstance(c, dict) and c.get("category")]
-                    if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
-                        # Write to a "pending" key — applied at top of next run before widget renders
-                        st.session_state["ov_cat_pending"] = clicked_cats
-                        st.rerun()
-            st.caption("Click a category segment above to filter the dashboard.")
+                clicked_cats = (
+                    [c.get("category") for c in clicked if isinstance(c, dict) and c.get("category")]
+                    if isinstance(clicked, list) else []
+                )
+                # Only react to NON-EMPTY clicks — Streamlit also fires on_select with an empty
+                # selection on rerun when the chart redraws with no internal state, which would
+                # incorrectly clear the filter. Deselect via the "× Clear" button.
+                if clicked_cats and sorted(clicked_cats) != sorted(selected_cats):
+                    st.session_state["ov_cat_pending"] = clicked_cats
+                    st.rerun()
+
+            # Caption + explicit Clear button when a category is currently selected
+            cap_col, btn_col = st.columns([4, 1])
+            cap_col.caption("Click a category segment above to filter. Click again (or use Clear) to undo.")
+            if selected_cats:
+                if btn_col.button("× Clear category", key="ov_clear_cat", use_container_width=True):
+                    st.session_state["ov_cat_pending"] = []
+                    st.rerun()
 
         # ---- Line chart ----
         try:
@@ -1065,7 +1138,11 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         else:
             y_field = "revenue" if metric == "Revenue" else "units"
             y_format = "$,.0f" if metric == "Revenue" else ",.0f"
-            color = PASTEL_PEACH if metric == "Revenue" else PASTEL_BLUE
+            # Source-aware line color: light purple when Both, otherwise metric-specific
+            if source == "Both":
+                color = PASTEL_PURPLE
+            else:
+                color = PASTEL_PEACH if metric == "Revenue" else PASTEL_BLUE
             # X-axis label format based on aggregation
             if gran_label == "month":
                 # Use "Jan 2026" if range spans multiple years, else just "Jan"
@@ -1159,7 +1236,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             .encode(
                 y=alt.Y("category:N", sort="-x", axis=alt.Axis(title=None)),
                 x=alt.X("inv_value:Q", axis=alt.Axis(title=None, format="$,.0f")),
-                color=alt.Color("category:N", scale=alt.Scale(range=PASTEL_PALETTE), legend=None),
+                color=alt.Color("category:N", scale=_category_color_scale(cat_value["category"].unique()), legend=None),
                 tooltip=["category:N", alt.Tooltip("inv_value:Q", format="$,.0f")],
             )
             .properties(height=260)
@@ -1570,9 +1647,46 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
     display["unit_cost"] = display["unit_cost"].apply(lambda v: f"${v:,.2f}" if pd.notna(v) else "-")
     display["expected_arrival"] = display["expected_arrival"].fillna("-")
     display["notes"] = display["notes"].fillna("-")
-    st.dataframe(display, hide_index=True, use_container_width=True)
 
-    st.caption(f"{len(display)} entries shown")
+    log_event = st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="multi-row",
+        key="purchase_log_table",
+    )
+    st.caption(f"{len(display)} entries shown · check rows to update status")
+
+    selected_rows = log_event.selection.rows if log_event and log_event.selection else []
+    if selected_rows:
+        # log was filtered same order as display, so iloc on log preserves alignment
+        selected_ids = log.iloc[selected_rows]["id"].tolist()
+        n = len(selected_ids)
+
+        st.divider()
+        st.markdown(f"#### {n} entr{'y' if n == 1 else 'ies'} selected")
+
+        ac = st.columns([1, 1, 1, 3])
+
+        def _bulk_update(new_status: str) -> None:
+            client = _get_supabase_client()
+            for row_id in selected_ids:
+                supabase_io.update_purchase_log_status(client, int(row_id), new_status)
+
+        if ac[0].button("Mark Shipped", key="po_mark_shipped", use_container_width=True):
+            _bulk_update("shipped")
+            st.success(f"Marked {n} as shipped")
+            st.rerun()
+        if ac[1].button("Mark Received", key="po_mark_received", type="primary", use_container_width=True):
+            _bulk_update("received")
+            st.success(f"Marked {n} as received")
+            st.rerun()
+        if ac[2].button("Mark Cancelled", key="po_mark_cancelled", use_container_width=True):
+            _bulk_update("cancelled")
+            st.success(f"Marked {n} as cancelled")
+            st.rerun()
+
     _supabase_edit_link("purchase_log")
 
 

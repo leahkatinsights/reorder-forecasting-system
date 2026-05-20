@@ -9,3 +9,4 @@ __pycache__/
 docs/superpowers/
 test-square.py
 update-costs.py
+backfill_categories.py

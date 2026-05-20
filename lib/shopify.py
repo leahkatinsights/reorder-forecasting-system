@@ -142,6 +142,24 @@ def fetch_products() -> pd.DataFrame:
     return df
 
 
+def fetch_product_types() -> pd.DataFrame:
+    """Return Shopify product_type and tags for every active SKU.
+
+    Columns: sku, product_type, tags (list[str]).
+    """
+    rows: list[dict[str, Any]] = []
+    for product in _paginate("/products.json", params={"limit": 250, "status": "active"}):
+        product_type = (product.get("product_type") or "").strip()
+        raw_tags = product.get("tags") or ""
+        tags = [t.strip() for t in raw_tags.split(",") if t.strip()] if isinstance(raw_tags, str) else list(raw_tags)
+        for v in product.get("variants", []):
+            sku = (v.get("sku") or "").strip()
+            if not sku:
+                continue
+            rows.append({"sku": sku, "product_type": product_type, "tags": tags})
+    return pd.DataFrame(rows)
+
+
 def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
     """Return daily units, gross revenue, and net revenue per SKU.
 
