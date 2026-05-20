@@ -211,6 +211,20 @@ def _get_supabase_client():
     return supabase_io.get_client()
 
 
+# SKU prefixes to exclude from the entire dashboard (services, not physical products)
+EXCLUDED_SKU_PREFIXES: tuple[str, ...] = ("LUM-SS-", "LUM-SER-")
+
+
+def _exclude_skus(df: pd.DataFrame, sku_col: str = "sku") -> pd.DataFrame:
+    """Drop rows whose SKU starts with any of EXCLUDED_SKU_PREFIXES."""
+    if df.empty or sku_col not in df.columns:
+        return df
+    mask = df[sku_col].apply(
+        lambda s: isinstance(s, str) and any(s.startswith(p) for p in EXCLUDED_SKU_PREFIXES)
+    )
+    return df[~mask].copy()
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading data...")
 def load_all_data() -> dict[str, Any]:
     """Pull everything we need for a dashboard session. Returns a dict of DataFrames + Settings."""
@@ -242,6 +256,30 @@ def load_all_data() -> dict[str, Any]:
             ignore_index=True,
         )
 
+    # Order-level adjustments (discounts + refunds) for net-revenue KPI
+    shopify_adj = shopify.fetch_daily_adjustments(days_back=days)
+    if not shopify_adj.empty:
+        shopify_adj["source"] = "shopify"
+    try:
+        square_adj = square.fetch_daily_adjustments(days_back=days)
+    except Exception:
+        square_adj = pd.DataFrame(columns=["date", "discounts", "refunds"])
+    if not square_adj.empty:
+        square_adj["source"] = "square"
+
+    if shopify_adj.empty and square_adj.empty:
+        adjustments = pd.DataFrame(columns=["date", "discounts", "refunds", "source"])
+    else:
+        adjustments = pd.concat(
+            [df for df in (shopify_adj, square_adj) if not df.empty],
+            ignore_index=True,
+        )
+
+    # Exclude service / non-product SKUs everywhere
+    products = _exclude_skus(products)
+    shop_products = _exclude_skus(shop_products)
+    sales = _exclude_skus(sales)
+
     return {
         "products": products,
         "vendors": vendors,
@@ -249,6 +287,7 @@ def load_all_data() -> dict[str, Any]:
         "purchase_log": purchase_log,
         "shop_products": shop_products,
         "sales": sales,
+        "adjustments": adjustments,
         "loaded_at": datetime.now(),
     }
 
@@ -392,7 +431,7 @@ st.caption(
 
 
 # ---------- Page routing ----------
-_ROW_COL_WIDTHS = [1.3, 4.4, 1.3, 1.3, 1.3, 0.7]
+_ROW_COL_WIDTHS = [1.3, 4.0, 1.1, 1.1, 1.1, 1.3, 0.7]
 
 
 def _kpi_tile(label: str, value: str, subline: str | None = None) -> str:
@@ -441,6 +480,9 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
     is_expanded = st.session_state.get(expanded_key, False)
     chevron = "▾" if is_expanded else "▸"
 
+    cost = r.get("recommended_cost")
+    cost_str = f"${cost:,.0f}" if pd.notna(cost) else "-"
+
     cols = st.columns(_ROW_COL_WIDTHS, vertical_alignment="center")
     cols[0].markdown(
         f"<div class='alert-status'>"
@@ -453,7 +495,8 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
     cols[2].markdown(f"<div class='alert-cell'>{int(r['on_hand'])}</div>", unsafe_allow_html=True)
     cols[3].markdown(f"<div class='alert-cell'>{days_str}</div>", unsafe_allow_html=True)
     cols[4].markdown(f"<div class='alert-cell'>{int(r['recommended_qty'])}</div>", unsafe_allow_html=True)
-    if cols[5].button(chevron, key=f"toggle_{r['sku']}", type="secondary"):
+    cols[5].markdown(f"<div class='alert-cell'>{cost_str}</div>", unsafe_allow_html=True)
+    if cols[6].button(chevron, key=f"toggle_{r['sku']}", type="secondary"):
         st.session_state[expanded_key] = not is_expanded
         st.rerun()
 
@@ -462,17 +505,20 @@ def _render_alert_row(r: pd.Series, vendors, expanded_key: str) -> None:
         if vendors is not None and pd.notna(r["vendor_id"]) and r["vendor_id"] in vendors.index:
             vendor_name = vendors.loc[r["vendor_id"], "name"]
         vendor_str = vendor_name or "-"
-        cost = r.get("recommended_cost")
-        cost_str = f"${cost:,.2f}" if pd.notna(cost) else "-"
+        unit_cost = r.get("unit_cost")
+        unit_cost_str = f"${unit_cost:,.2f}" if pd.notna(unit_cost) else "-"
         velocity = r["daily_velocity"]
         velocity_str = f"{velocity:.2f}" if pd.notna(velocity) else "-"
+        days = r["days_of_supply"]
+        days_str = f"{days:.1f}" if pd.notna(days) else "∞"
 
         detail_cols = st.columns(_ROW_COL_WIDTHS)
         detail_cols[1].markdown(
             f"<div class='alert-detail'>"
-            f"Clinic {int(r['on_hand_clinic'])}  ·  WSA {int(r['on_hand_wsa'])}<br>"
-            f"Velocity {velocity_str} units/day<br>"
-            f"Est. cost {cost_str}  ·  Vendor: {vendor_str}"
+            f"<b>Inventory</b>: Clinic {int(r['on_hand_clinic'])}  ·  WSA {int(r['on_hand_wsa'])}  ·  Total {int(r['on_hand'])}<br>"
+            f"<b>Velocity</b>: {velocity_str} units/day  ·  <b>Days of supply</b>: {days_str}<br>"
+            f"<b>Cost math</b>: {int(r['recommended_qty'])} units × {unit_cost_str} = {cost_str}<br>"
+            f"<b>Vendor</b>: {vendor_str}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -523,7 +569,15 @@ def _fmt_compact(n: float, prefix: str = "") -> str:
     return f"{prefix}{n:,.0f}"
 
 
-def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6", large: bool = False) -> str:
+def _kpi_card(
+    label: str,
+    value: str,
+    sub: str | None = None,
+    bg: str = "#F4F4F6",
+    large: bool = False,
+    secondary_label: str | None = None,
+    secondary_value: str | None = None,
+) -> str:
     """Render a KPI as a styled card. Returns HTML string for st.markdown(unsafe_allow_html=True).
 
     The HTML is intentionally NOT indented · Streamlit's CommonMark parser would otherwise
@@ -540,10 +594,27 @@ def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6
         padding = "16px 20px"
         label_size = "clamp(10px,0.75vw,12px)"
         value_size = "clamp(28px,3vw,44px)"
+        secondary_label_size = "clamp(9px,0.7vw,11px)"
+        secondary_value_size = "clamp(14px,1.4vw,20px)"
     else:
         padding = "14px 16px"
         label_size = "clamp(9px,0.7vw,11px)"
         value_size = "clamp(18px,2vw,28px)"
+        secondary_label_size = "clamp(8px,0.6vw,10px)"
+        secondary_value_size = "clamp(11px,1.1vw,15px)"
+
+    secondary_html = ""
+    if secondary_label and secondary_value:
+        secondary_html = (
+            f'<div style="margin-top:10px;padding-top:8px;border-top:1px solid #E2E2E5;'
+            f'display:flex;align-items:baseline;gap:8px;white-space:nowrap;overflow:hidden;">'
+            f'<span style="font-size:{secondary_label_size};font-weight:700;letter-spacing:0.08em;'
+            f'text-transform:uppercase;color:#6b6b73;">{secondary_label}</span>'
+            f'<span style="font-size:{secondary_value_size};font-weight:800;color:#111;'
+            f"font-family:'Inter',sans-serif;letter-spacing:-0.01em;\">{secondary_value}</span>"
+            f'</div>'
+        )
+
     return (
         f'<div style="background:{bg};border-radius:10px;padding:{padding};min-width:0;">'
         f'<div style="font-size:{label_size};font-weight:700;letter-spacing:0.08em;'
@@ -553,6 +624,7 @@ def _kpi_card(label: str, value: str, sub: str | None = None, bg: str = "#F4F4F6
         f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;"
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{value}</div>'
         f'{sub_html}'
+        f'{secondary_html}'
         f'</div>'
     )
 
@@ -607,15 +679,24 @@ def _hover_line_chart(
     height: int = 200,
     color: str = "#111",
     tooltip_extra: list | None = None,
+    x_format: str | None = None,
+    x_tick_count: str | int | None = None,
 ) -> "alt.LayerChart":
     """Interactive Altair line chart with hover guideline + dot + value label.
 
     df must have x_field (temporal) and y_field (quantitative).
-    tooltip_extra: list of additional alt.Tooltip() entries to show on hover.
+    x_format: D3 format string for x-axis tick labels (e.g. "%b" -> "Jan, Feb").
+    x_tick_count: "month", "week", "year", or an int.
     """
     nearest = alt.selection_point(nearest=True, on="pointerover", fields=[x_field], empty=False)
 
-    base = alt.Chart(df).encode(x=alt.X(f"{x_field}:T", axis=alt.Axis(title=None)))
+    x_axis_kwargs: dict[str, Any] = {"title": None, "labelAngle": 0}
+    if x_format:
+        x_axis_kwargs["format"] = x_format
+    if x_tick_count is not None:
+        x_axis_kwargs["tickCount"] = x_tick_count
+
+    base = alt.Chart(df).encode(x=alt.X(f"{x_field}:T", axis=alt.Axis(**x_axis_kwargs)))
 
     line = base.mark_line(color=color, strokeWidth=2.5).encode(
         y=alt.Y(f"{y_field}:Q", axis=alt.Axis(title=None, format=y_format)),
@@ -765,9 +846,34 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     now_count = int((filt_recs["status"] == "reorder_now").sum())
     soon_count = int((filt_recs["status"] == "reorder_soon").sum())
 
+    # ---- Net revenue = gross - discounts - refunds (definition A) ----
+    adjustments = data.get("adjustments", pd.DataFrame())
+    total_discounts = 0.0
+    total_refunds = 0.0
+    if not adjustments.empty:
+        adj = adjustments[
+            (adjustments["date"] >= range_start) & (adjustments["date"] <= range_end)
+        ]
+        # Respect the source toggle
+        if "source" in adj.columns and source != "Both":
+            adj = adj[adj["source"] == source.lower()]
+        if not adj.empty:
+            total_discounts = float(adj["discounts"].sum())
+            total_refunds = float(adj["refunds"].sum())
+    net_revenue = max(0.0, total_revenue - total_discounts - total_refunds)
+
     with top_right:
-        # Hero Revenue card (full width, large)
-        st.markdown(_kpi_card("Revenue", _fmt_compact(total_revenue, "$"), large=True), unsafe_allow_html=True)
+        # Hero Revenue card (full width, large) — Gross with Net as a sub-line
+        st.markdown(
+            _kpi_card(
+                "Revenue",
+                _fmt_compact(total_revenue, "$"),
+                large=True,
+                secondary_label="Net",
+                secondary_value=_fmt_compact(net_revenue, "$"),
+            ),
+            unsafe_allow_html=True,
+        )
         st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
         # 4 supporting cards in a 2x2 grid
         r2 = st.columns(2, gap="small")
@@ -910,9 +1016,27 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             y_field = "revenue" if metric == "Revenue" else "units"
             y_format = "$,.0f" if metric == "Revenue" else ",.0f"
             color = PASTEL_PEACH if metric == "Revenue" else PASTEL_BLUE
+            # X-axis label format based on aggregation
+            if gran_label == "month":
+                # Use "Jan 2026" if range spans multiple years, else just "Jan"
+                multi_year = (range_end.year - range_start.year) > 0
+                x_format = "%b %Y" if multi_year else "%b"
+                x_tick_count = "month"
+            elif gran_label == "week":
+                x_format = "%b %d"
+                x_tick_count = "week"
+            else:
+                x_format = "%b %d"
+                x_tick_count = None
             try:
                 chart = _hover_line_chart(
-                    grouped, y_field=y_field, y_format=y_format, color=color, height=260
+                    grouped,
+                    y_field=y_field,
+                    y_format=y_format,
+                    color=color,
+                    height=260,
+                    x_format=x_format,
+                    x_tick_count=x_tick_count,
                 )
                 st.altair_chart(chart, use_container_width=True)
             except Exception as e:
@@ -929,19 +1053,26 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
     if filt_sales.empty:
         st.info("No sales.")
     else:
+        # Aggregate units, gross revenue, and net revenue (gracefully default net_revenue=revenue if missing)
+        agg_cols = ["units", "revenue"]
+        if "net_revenue" in filt_sales.columns:
+            agg_cols.append("net_revenue")
         top = (
-            filt_sales.groupby("sku", as_index=False)[["units", "revenue"]]
+            filt_sales.groupby("sku", as_index=False)[agg_cols]
             .sum()
             .sort_values("revenue", ascending=False)
             .head(15)
         )
+        if "net_revenue" not in top.columns:
+            top["net_revenue"] = top["revenue"]
         top["name"] = top["sku"].map(name_by_sku).fillna("-")
         image_by_sku = recs.set_index("sku")["image_url"].to_dict() if "image_url" in recs.columns else {}
         top["image_url"] = top["sku"].map(image_by_sku).fillna("")
         top["revenue"] = top["revenue"].round(2)
+        top["net_revenue"] = top["net_revenue"].round(2)
         top["avg_price"] = (top["revenue"] / top["units"].clip(lower=1)).round(2)
-        disp = top[["image_url", "sku", "name", "units", "avg_price", "revenue"]].copy()
-        disp.columns = ["Image", "SKU", "Product", "Units", "Avg $", "Revenue"]
+        disp = top[["image_url", "sku", "name", "units", "avg_price", "revenue", "net_revenue"]].copy()
+        disp.columns = ["Image", "SKU", "Product", "Units", "Avg $", "Revenue", "Net Revenue"]
         st.dataframe(
             disp,
             hide_index=True,
@@ -950,6 +1081,7 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                 "Image": st.column_config.ImageColumn("Image", width="small"),
                 "Avg $": st.column_config.NumberColumn(format="$%.2f"),
                 "Revenue": st.column_config.NumberColumn(format="$%.0f"),
+                "Net Revenue": st.column_config.NumberColumn(format="$%.0f"),
             },
         )
 
@@ -1100,6 +1232,7 @@ def render_reorder_alerts(recs: pd.DataFrame, data: dict) -> None:
     header_cols[2].markdown("<div class='alert-th alert-th-right'>ON HAND</div>", unsafe_allow_html=True)
     header_cols[3].markdown("<div class='alert-th alert-th-right'>DAYS LEFT</div>", unsafe_allow_html=True)
     header_cols[4].markdown("<div class='alert-th alert-th-right'>NEED</div>", unsafe_allow_html=True)
+    header_cols[5].markdown("<div class='alert-th alert-th-right'>EST. COST</div>", unsafe_allow_html=True)
     st.markdown("<hr class='alert-row-divider'>", unsafe_allow_html=True)
 
     vendors = data["vendors"].set_index("id") if not data["vendors"].empty else None

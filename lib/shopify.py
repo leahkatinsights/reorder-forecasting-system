@@ -143,10 +143,12 @@ def fetch_products() -> pd.DataFrame:
 
 
 def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
-    """Return daily units sold per SKU for the last `days_back` days.
+    """Return daily units, gross revenue, and net revenue per SKU.
 
-    Columns: sku, date, units, revenue. One row per (sku, day) for days with sales.
+    Columns: sku, date, units, revenue (gross), net_revenue.
+    Net = gross - per-line discounts - per-line refunds.
     """
+    cols = ["sku", "date", "units", "revenue", "net_revenue"]
     since = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
 
     line_rows: list[dict[str, Any]] = []
@@ -154,7 +156,7 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
         "status": "any",
         "limit": 250,
         "created_at_min": since,
-        "fields": "created_at,line_items,financial_status,cancelled_at",
+        "fields": "created_at,line_items,refunds,financial_status,cancelled_at",
     }
 
     for order in _paginate("/orders.json", params=params):
@@ -163,6 +165,19 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
         if order.get("financial_status") in ("refunded", "voided"):
             continue
         created = order["created_at"][:10]  # YYYY-MM-DD
+
+        # Build {line_item_id: refund_amount} for this order
+        refund_by_line_id: dict[int, float] = {}
+        for refund in order.get("refunds") or []:
+            for rli in refund.get("refund_line_items") or []:
+                line_id = rli.get("line_item_id")
+                try:
+                    amount = float(rli.get("subtotal") or 0)
+                except (TypeError, ValueError):
+                    amount = 0.0
+                if line_id is not None:
+                    refund_by_line_id[line_id] = refund_by_line_id.get(line_id, 0.0) + amount
+
         for li in order.get("line_items", []):
             sku = (li.get("sku") or "").strip()
             qty = li.get("quantity") or 0
@@ -172,15 +187,73 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
                 price = float(li.get("price") or 0)
             except (TypeError, ValueError):
                 price = 0.0
-            line_rows.append({"sku": sku, "date": created, "units": qty, "revenue": price * qty})
+            gross = price * qty
+            # Per-line discounts (Shopify allocates order-level discounts to line items)
+            discount = 0.0
+            for d in li.get("discount_allocations") or []:
+                try:
+                    discount += float(d.get("amount") or 0)
+                except (TypeError, ValueError):
+                    pass
+            refund = refund_by_line_id.get(li.get("id"), 0.0)
+            net = max(0.0, gross - discount - refund)
+            line_rows.append({
+                "sku": sku, "date": created, "units": qty,
+                "revenue": gross, "net_revenue": net,
+            })
 
     if not line_rows:
-        return pd.DataFrame(columns=["sku", "date", "units", "revenue"])
+        return pd.DataFrame(columns=cols)
 
     df = pd.DataFrame(line_rows)
     df["date"] = pd.to_datetime(df["date"])
-    daily = df.groupby(["sku", "date"], as_index=False)[["units", "revenue"]].sum()
+    daily = df.groupby(["sku", "date"], as_index=False)[["units", "revenue", "net_revenue"]].sum()
     return daily
+
+
+def fetch_daily_adjustments(days_back: int = 365) -> pd.DataFrame:
+    """Return daily order-level discount + refund totals.
+
+    Columns: date, discounts, refunds. Used to compute net revenue at the company level.
+    Mirrors the order filter from fetch_daily_sales so totals are consistent with gross.
+    """
+    cols = ["date", "discounts", "refunds"]
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+
+    rows: list[dict[str, Any]] = []
+    params = {
+        "status": "any",
+        "limit": 250,
+        "created_at_min": since,
+        "fields": "created_at,total_discounts,total_price,current_total_price,financial_status,cancelled_at",
+    }
+
+    for order in _paginate("/orders.json", params=params):
+        if order.get("cancelled_at"):
+            continue
+        if order.get("financial_status") in ("refunded", "voided"):
+            continue
+        date = (order.get("created_at") or "")[:10]
+        if not date:
+            continue
+        try:
+            discounts = float(order.get("total_discounts") or 0)
+        except (TypeError, ValueError):
+            discounts = 0.0
+        try:
+            total = float(order.get("total_price") or 0)
+            current = float(order.get("current_total_price") or total)
+            refund = max(0.0, total - current)  # >0 only for partially-refunded orders
+        except (TypeError, ValueError):
+            refund = 0.0
+        rows.append({"date": date, "discounts": discounts, "refunds": refund})
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.groupby("date", as_index=False)[["discounts", "refunds"]].sum()
 
 
 def daily_sales_for_sku(daily_df: pd.DataFrame, sku: str, days_back: int = 365) -> pd.Series:

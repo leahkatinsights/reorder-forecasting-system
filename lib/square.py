@@ -55,11 +55,12 @@ def _fetch_sku_map() -> dict[str, str]:
 
 
 def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
-    """Return daily units + revenue per SKU from Square completed orders.
+    """Return daily units, gross revenue, and net revenue per SKU from Square.
 
-    Columns: sku, date, units, revenue. Returns empty DataFrame if Square isn't configured.
+    Columns: sku, date, units, revenue (gross), net_revenue.
+    Net = gross - per-line discounts. (Refunds are at order level on Square; not allocated per-line.)
     """
-    cols = ["sku", "date", "units", "revenue"]
+    cols = ["sku", "date", "units", "revenue", "net_revenue"]
     if not _is_configured():
         return pd.DataFrame(columns=cols)
 
@@ -109,11 +110,15 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
                 money = (li.get("gross_sales_money") or li.get("total_money") or {})
                 amount_cents = money.get("amount") or 0
                 revenue = float(amount_cents) / 100.0
+                disc_cents = (li.get("total_discount_money") or {}).get("amount") or 0
+                discount = float(disc_cents) / 100.0
+                net = max(0.0, revenue - discount)
                 line_rows.append({
                     "sku": sku,
                     "date": created,
                     "units": qty,
                     "revenue": revenue,
+                    "net_revenue": net,
                 })
 
         cursor = data.get("cursor")
@@ -125,5 +130,64 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
 
     df = pd.DataFrame(line_rows)
     df["date"] = pd.to_datetime(df["date"])
-    daily = df.groupby(["sku", "date"], as_index=False)[["units", "revenue"]].sum()
+    daily = df.groupby(["sku", "date"], as_index=False)[["units", "revenue", "net_revenue"]].sum()
     return daily
+
+
+def fetch_daily_adjustments(days_back: int = 365) -> pd.DataFrame:
+    """Return daily order-level discount + refund totals from Square completed orders.
+
+    Columns: date, discounts, refunds.
+    """
+    cols = ["date", "discounts", "refunds"]
+    if not _is_configured():
+        return pd.DataFrame(columns=cols)
+
+    location_id = os.environ["SQUARE_LOCATION_ID"]
+    since = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+
+    rows: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        body: dict[str, Any] = {
+            "location_ids": [location_id],
+            "query": {
+                "filter": {
+                    "state_filter": {"states": ["COMPLETED"]},
+                    "date_time_filter": {"created_at": {"start_at": since}},
+                },
+            },
+            "limit": 500,
+        }
+        if cursor:
+            body["cursor"] = cursor
+
+        resp = requests.post(f"{API_BASE}/orders/search", headers=_headers(), json=body, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        for order in data.get("orders", []):
+            date = (order.get("created_at") or "")[:10]
+            if not date:
+                continue
+            disc_cents = (order.get("total_discount_money") or {}).get("amount") or 0
+            refunds_list = order.get("refunds") or []
+            refund_cents = sum(
+                ((r.get("amount_money") or {}).get("amount") or 0)
+                for r in refunds_list
+            )
+            rows.append({
+                "date": date,
+                "discounts": float(disc_cents) / 100.0,
+                "refunds": float(refund_cents) / 100.0,
+            })
+
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.groupby("date", as_index=False)[["discounts", "refunds"]].sum()
