@@ -28,15 +28,14 @@ st.set_page_config(
 
 # Mirror Streamlit Cloud secrets into os.environ for code that reads via os.environ.
 # Done AFTER set_page_config (st.secrets access counts as a Streamlit command).
-# Skips entirely if no secrets.toml exists locally (.env handles env vars).
-_SECRETS_PATHS = [
-    os.path.expanduser("~/.streamlit/secrets.toml"),
-    os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml"),
-]
-if any(os.path.exists(p) for p in _SECRETS_PATHS):
+# Wrapped in broad try/except so missing or unreadable secrets never crash the app.
+try:
+    _secrets_dict = dict(st.secrets) if st.secrets else {}
+except Exception:
+    _secrets_dict = {}
+for _key, _value in _secrets_dict.items():
     try:
-        for _key, _value in st.secrets.items():
-            os.environ.setdefault(_key, str(_value))
+        os.environ.setdefault(str(_key), str(_value))
     except Exception:
         pass
 
@@ -569,6 +568,21 @@ def _fmt_compact(n: float, prefix: str = "") -> str:
     return f"{prefix}{n:,.0f}"
 
 
+def _delta_html(delta_pct: float | None, font_size: str = "clamp(11px,1vw,13px)") -> str:
+    """Render a colored % delta indicator. Green for up, red for down."""
+    if delta_pct is None:
+        return ""
+    if delta_pct >= 0:
+        arrow, color = "↑", "#16A34A"
+    else:
+        arrow, color = "↓", "#DC2626"
+    return (
+        f'<span style="color:{color};font-size:{font_size};font-weight:700;'
+        f'margin-left:10px;vertical-align:middle;white-space:nowrap;">'
+        f'{arrow}&nbsp;{abs(delta_pct):.1f}%</span>'
+    )
+
+
 def _kpi_card(
     label: str,
     value: str,
@@ -577,6 +591,7 @@ def _kpi_card(
     large: bool = False,
     secondary_label: str | None = None,
     secondary_value: str | None = None,
+    delta_pct: float | None = None,
 ) -> str:
     """Render a KPI as a styled card. Returns HTML string for st.markdown(unsafe_allow_html=True).
 
@@ -615,6 +630,9 @@ def _kpi_card(
             f'</div>'
         )
 
+    delta_font = "clamp(12px,1.1vw,15px)" if large else "clamp(10px,0.9vw,12px)"
+    delta_html = _delta_html(delta_pct, font_size=delta_font)
+
     return (
         f'<div style="background:{bg};border-radius:10px;padding:{padding};min-width:0;">'
         f'<div style="font-size:{label_size};font-weight:700;letter-spacing:0.08em;'
@@ -622,7 +640,9 @@ def _kpi_card(
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{label}</div>'
         f'<div style="font-size:{value_size};font-weight:900;color:#111;line-height:1.05;'
         f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;"
-        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{value}</div>'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+        f'<span style="vertical-align:middle;">{value}</span>{delta_html}'
+        f'</div>'
         f'{sub_html}'
         f'{secondary_html}'
         f'</div>'
@@ -862,8 +882,37 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             total_refunds = float(adj["refunds"].sum())
     net_revenue = max(0.0, total_revenue - total_discounts - total_refunds)
 
+    # ---- Prior-period comparison (same length, immediately before current range) ----
+    prior_end = range_start - pd.Timedelta(days=1)
+    prior_start = prior_end - pd.Timedelta(days=days_in_range - 1)
+    prior_revenue = 0.0
+    prior_units = 0
+    if has_revenue:
+        prior_sales = sales[(sales["date"] >= prior_start) & (sales["date"] <= prior_end)].copy()
+        if "source" in prior_sales.columns and source != "Both":
+            prior_sales = prior_sales[prior_sales["source"] == source.lower()]
+        if selected_cats or selected_vendor_ids or selected_skus:
+            allowed = set(filt_recs["sku"].tolist())
+            prior_sales = prior_sales[prior_sales["sku"].isin(allowed)]
+        if exclude_high and not prior_sales.empty:
+            # Use the same set of excluded SKUs identified for the current period
+            prior_sales = prior_sales[~prior_sales["sku"].isin(excluded_skus)]
+        if not prior_sales.empty:
+            prior_revenue = float(prior_sales["revenue"].sum())
+            prior_units = int(prior_sales["units"].sum())
+    prior_avg_daily = prior_revenue / days_in_range
+
+    def _pct(curr: float, prior: float) -> float | None:
+        if prior <= 0:
+            return None
+        return (curr - prior) / prior * 100
+
+    rev_delta = _pct(total_revenue, prior_revenue)
+    units_delta = _pct(total_units, prior_units)
+    avg_delta = _pct(avg_daily_rev, prior_avg_daily)
+
     with top_right:
-        # Hero Revenue card (full width, large) — Gross with Net as a sub-line
+        # Hero Revenue card (full width, large) — Gross with Net as a sub-line + delta vs prior period
         st.markdown(
             _kpi_card(
                 "Revenue",
@@ -871,14 +920,15 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                 large=True,
                 secondary_label="Net",
                 secondary_value=_fmt_compact(net_revenue, "$"),
+                delta_pct=rev_delta,
             ),
             unsafe_allow_html=True,
         )
         st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
         # 4 supporting cards in a 2x2 grid
         r2 = st.columns(2, gap="small")
-        r2[0].markdown(_kpi_card("Units sold",  _fmt_compact(total_units)),        unsafe_allow_html=True)
-        r2[1].markdown(_kpi_card("Avg daily $", _fmt_compact(avg_daily_rev, "$")), unsafe_allow_html=True)
+        r2[0].markdown(_kpi_card("Units sold",  _fmt_compact(total_units),        delta_pct=units_delta), unsafe_allow_html=True)
+        r2[1].markdown(_kpi_card("Avg daily $", _fmt_compact(avg_daily_rev, "$"), delta_pct=avg_delta),   unsafe_allow_html=True)
         st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
         r3 = st.columns(2, gap="small")
         r3[0].markdown(_kpi_card("SKUs in scope", _fmt_compact(len(filt_recs))), unsafe_allow_html=True)
