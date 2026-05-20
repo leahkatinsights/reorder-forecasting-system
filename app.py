@@ -1470,7 +1470,7 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
     st.caption(f"Shaded band = ±1 std of historical daily sales (~68% range). σ = {hist_std:.2f} units/day")
 
     st.divider()
-    with st.expander("Math breakdown"):
+    with st.expander("Math breakdown", expanded=True):
         dos = row["days_of_supply"]
         dos_str = f"{dos:.1f}" if dos is not None else "infinite"
         st.markdown(
