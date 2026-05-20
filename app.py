@@ -13,25 +13,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Mirror Streamlit Cloud secrets into os.environ for code that reads via os.environ.
-# Locally this is a no-op (st.secrets file doesn't exist; .env handles it).
-try:
-    for _key, _value in st.secrets.items():
-        os.environ.setdefault(_key, str(_value))
-except Exception:
-    pass
-
 from lib import finance, shopify, square, supabase_io  # noqa: E402
 from lib.forecast import calculate_velocity, history_metadata  # noqa: E402
 from lib.reorder import ReorderRecommendation, Settings, compute_recommendation  # noqa: E402
 
 
 # ---------- Streamlit config ----------
+# set_page_config MUST be the first Streamlit command; nothing st.* may run before it.
 st.set_page_config(
     page_title="Lumati Repurchase",
     page_icon="📦",
     layout="wide",
 )
+
+# Mirror Streamlit Cloud secrets into os.environ for code that reads via os.environ.
+# Done AFTER set_page_config (st.secrets access counts as a Streamlit command).
+# Skips entirely if no secrets.toml exists locally (.env handles env vars).
+_SECRETS_PATHS = [
+    os.path.expanduser("~/.streamlit/secrets.toml"),
+    os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml"),
+]
+if any(os.path.exists(p) for p in _SECRETS_PATHS):
+    try:
+        for _key, _value in st.secrets.items():
+            os.environ.setdefault(_key, str(_value))
+    except Exception:
+        pass
 
 LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
 st.logo(LOGO_URL, size="large")

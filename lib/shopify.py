@@ -184,7 +184,11 @@ def fetch_daily_sales(days_back: int = 365) -> pd.DataFrame:
 
 
 def daily_sales_for_sku(daily_df: pd.DataFrame, sku: str, days_back: int = 365) -> pd.Series:
-    """Return a complete daily Series (one row per day, zero-filled) for one SKU."""
+    """Return a complete daily Series (one row per day, zero-filled) for one SKU.
+
+    Combines duplicate (sku, date) rows by summing — handles the case where the same
+    SKU was sold the same day on both Shopify and Square.
+    """
     end = pd.Timestamp(datetime.now(timezone.utc).date())
     start = end - pd.Timedelta(days=days_back - 1)
     full_index = pd.date_range(start=start, end=end, freq="D")
@@ -193,6 +197,7 @@ def daily_sales_for_sku(daily_df: pd.DataFrame, sku: str, days_back: int = 365) 
     if sku_df.empty:
         return pd.Series([0] * len(full_index), index=full_index, name="units")
 
-    series = sku_df.set_index("date")["units"].reindex(full_index, fill_value=0)
+    # Sum across sources for the same date so reindex doesn't choke on duplicates
+    series = sku_df.groupby("date")["units"].sum().reindex(full_index, fill_value=0)
     series.name = "units"
     return series
