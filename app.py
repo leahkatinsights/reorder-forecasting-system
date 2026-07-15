@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEMO_MODE = os.getenv("DEMO_MODE") == "1"
+
 from lib import finance, shopify, square, supabase_io  # noqa: E402
 from lib.forecast import calculate_velocity, history_metadata  # noqa: E402
 from lib.reorder import ReorderRecommendation, Settings, compute_recommendation  # noqa: E402
@@ -43,7 +45,7 @@ def _lki_theme():
 # ---------- Streamlit config ----------
 # set_page_config MUST be the first Streamlit command; nothing st.* may run before it.
 st.set_page_config(
-    page_title="Lumati Repurchase",
+    page_title="Aura Wellness Inventory" if DEMO_MODE else "Lumati Repurchase",
     page_icon="📦",
     layout="wide",
 )
@@ -62,7 +64,24 @@ for _key, _value in _secrets_dict.items():
         pass
 
 LOGO_URL = "https://shop.lumati.com/cdn/shop/files/lumatllogo_black_nt_hor-500.png?v=1768746788&width=280"
-st.logo(LOGO_URL, size="large")
+if DEMO_MODE:
+    st.sidebar.markdown(
+        """
+        <div style="text-align:center; padding: 18px 0 6px;">
+          <div style="font-family:Inter,sans-serif; font-weight:800; font-size:30px;
+                      letter-spacing:0.08em; color:#111111;">AURA</div>
+          <div style="font-family:Inter,sans-serif; font-weight:500; font-size:15px;
+                      letter-spacing:0.42em; color:#1F2E45;">WELLNESS</div>
+          <div style="font-size:9px; letter-spacing:0.3em; color:#6B7280;
+                      margin-top:6px;">RESTORATIVE CARE</div>
+          <div style="font-size:8px; letter-spacing:0.2em; color:#8A93A2;
+                      margin-top:4px;">NEW YORK &middot; LONDON &middot; PARIS</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.logo(LOGO_URL, size="large")
 
 # Load Manrope display font for headers
 st.markdown(
@@ -255,6 +274,10 @@ def _exclude_skus(df: pd.DataFrame, sku_col: str = "sku") -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner="Loading data...")
 def load_all_data() -> dict[str, Any]:
     """Pull everything we need for a dashboard session. Returns a dict of DataFrames + Settings."""
+    if DEMO_MODE:
+        from lib import demo_data
+        return demo_data.load_all_data_demo()
+
     client = _get_supabase_client()
     products = supabase_io.fetch_products(client)
     vendors = supabase_io.fetch_vendors(client)
@@ -456,7 +479,7 @@ page = st.session_state.page
 data = load_all_data()
 recs = build_recommendations(data)
 
-if not recs.empty:
+if not recs.empty and not DEMO_MODE:
     rows = recs[["sku", "on_hand", "daily_velocity", "days_of_supply", "status", "recommended_qty"]].to_dict("records")
     try:
         supabase_io.write_forecast_log(_get_supabase_client(), rows)
@@ -574,7 +597,7 @@ STATUS_COLORS = {
     "dead":                 "#6B6B70",
     "insufficient_history": "#C0C0C5",
     "manual_override":      "#888888",
-    "on_order":             "#6FA3D4",  # calm blue — outstanding PO is being handled
+    "on_order":             "#6FA3D4",  # calm blue - outstanding PO is being handled
 }
 
 # Institutional categorical palette used across dashboard charts
@@ -1685,6 +1708,9 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
 
             submitted = st.form_submit_button("Log purchase", type="primary")
             if submitted:
+                if DEMO_MODE:
+                    st.info("Demo mode: writes disabled")
+                    st.stop()
                 try:
                     supabase_io.insert_purchase_log(
                         _get_supabase_client(),
@@ -1704,7 +1730,7 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
     st.divider()
     st.subheader("History")
 
-    log = supabase_io.fetch_purchase_log(_get_supabase_client())
+    log = data["purchase_log"] if DEMO_MODE else supabase_io.fetch_purchase_log(_get_supabase_client())
     if log.empty:
         st.info("No purchases logged yet. Use the form above to add one.")
         return
@@ -1755,6 +1781,9 @@ def render_purchase_log(recs: pd.DataFrame, data: dict) -> None:
         ac = st.columns([1, 1, 1, 3])
 
         def _bulk_update(new_status: str) -> None:
+            if DEMO_MODE:
+                st.info("Demo mode: writes disabled")
+                st.stop()
             client = _get_supabase_client()
             for row_id in selected_ids:
                 supabase_io.update_purchase_log_status(client, int(row_id), new_status)
@@ -1997,6 +2026,9 @@ def render_all_products(recs: pd.DataFrame, data: dict) -> None:
                 submitted = st.form_submit_button("Log purchase order", type="primary")
 
                 if submitted:
+                    if DEMO_MODE:
+                        st.info("Demo mode: writes disabled")
+                        st.stop()
                     client = _get_supabase_client()
                     inserted = 0
                     errors = []
