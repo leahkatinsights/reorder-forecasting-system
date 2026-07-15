@@ -19,8 +19,6 @@ _CATEGORIES = {
 }
 _VENDORS = ["Halcyon Labs", "Meridian Supply Co.", "NordWell Distribution",
             "Pacifica Botanicals"]
-# Anchor demo dates to a fixed "today" so charts look current relative to run date
-_TODAY = None  # set at call time
 
 
 def _products(rng: np.random.Generator) -> pd.DataFrame:
@@ -114,7 +112,7 @@ def _purchase_log(products: pd.DataFrame, rng: np.random.Generator,
             "quantity": int(rng.choice([25, 50, 100, 200])),
             "unit_cost": p["unit_cost"],
             "expected_arrival": (ordered + timedelta(days=21)).date().isoformat(),
-            "status": str(rng.choice(["ordered", "received", "received"])),
+            "status": str(rng.choice(["placed", "received", "received"])),
             "notes": None,
             "created_at": ordered.isoformat(),
         })
