@@ -121,7 +121,8 @@ def _purchase_log(products: pd.DataFrame, rng: np.random.Generator,
 
 def load_all_data_demo() -> dict:
     rng = np.random.default_rng(_SEED)
-    today = pd.Timestamp.now().normalize()
+    # Fixed anchor so demo numbers and screenshots are reproducible across days
+    today = pd.Timestamp("2026-07-15")
     products = _products(rng)
     sales = _sales(products, rng, today)
     adjustments = (sales.groupby(["date", "source"], as_index=False)

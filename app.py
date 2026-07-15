@@ -1531,10 +1531,10 @@ def render_forecast_detail(recs: pd.DataFrame, data: dict) -> None:
         <div style="padding-top: 12px;">
             <div style="
                 color: #111;
-                font-family: 'Inter', sans-serif;
+                font-family: 'Source Serif 4', Georgia, serif;
                 font-size: 32px;
-                font-weight: 900;
-                letter-spacing: -0.025em;
+                font-weight: 600;
+                letter-spacing: -0.01em;
                 line-height: 1.1;
                 margin: 0 0 6px 0;
             ">{row['name']}</div>
