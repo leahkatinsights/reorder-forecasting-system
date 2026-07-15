@@ -212,8 +212,9 @@ st.markdown(
         text-transform: uppercase; color: #8a8a90; margin-bottom: 8px;
     }
     .kpi-value {
-        font-size: 32px; font-weight: 700; color: #111;
-        line-height: 1; letter-spacing: -0.02em;
+        font-size: 32px; font-weight: 600; color: #111;
+        line-height: 1; letter-spacing: -0.01em;
+        font-family: 'Source Serif 4', Georgia, serif;
     }
     .kpi-sub { font-size: 12px; color: #8a8a90; margin-top: 6px; }
     .kpi-section-divider {
