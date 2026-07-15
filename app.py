@@ -83,12 +83,12 @@ if DEMO_MODE:
 else:
     st.logo(LOGO_URL, size="large")
 
-# Load Manrope display font for headers
+# Load Inter (body/UI) and Source Serif 4 (page headers)
 st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
@@ -166,7 +166,7 @@ st.markdown(
     /* Reduce top padding so headers sit higher on every page */
     .block-container { padding-top: 1.5rem !important; }
 
-    /* ---- Page headers: big bold display font (Inter Black 900) ---- */
+    /* ---- Page headers: serif display (Source Serif 4), institutional ---- */
     h1, h2, h3, h4, h5, h6,
     [data-testid="stHeading"] h1,
     [data-testid="stHeading"] h2,
@@ -180,14 +180,14 @@ st.markdown(
     [data-testid="stMarkdownContainer"] h4,
     [data-testid="stMarkdownContainer"] h5,
     [data-testid="stMarkdownContainer"] h6 {
-        font-family: 'Inter', sans-serif !important;
-        font-weight: 900 !important;
-        letter-spacing: -0.025em !important;
-        line-height: 1.1 !important;
+        font-family: 'Source Serif 4', Georgia, serif !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.01em !important;
+        line-height: 1.12 !important;
         color: #111 !important;
     }
-    h1, [data-testid="stHeading"] h1 { font-size: 52px !important; margin-bottom: 6px !important; }
-    h2, [data-testid="stHeading"] h2 { font-size: 40px !important; margin-bottom: 6px !important; }
+    h1, [data-testid="stHeading"] h1 { font-size: 48px !important; margin-bottom: 6px !important; }
+    h2, [data-testid="stHeading"] h2 { font-size: 36px !important; margin-bottom: 6px !important; }
     h3, [data-testid="stHeading"] h3 { font-size: 24px !important; margin-bottom: 4px !important; }
     h4, [data-testid="stHeading"] h4 { font-size: 20px !important; margin-bottom: 4px !important; }
     h5, [data-testid="stHeading"] h5 { font-size: 17px !important; margin-bottom: 4px !important; }
