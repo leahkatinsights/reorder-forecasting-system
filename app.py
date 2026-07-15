@@ -124,6 +124,13 @@ st.markdown(
     section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
         gap: 0px !important;
     }
+    /* Streamlit gives sidebar markdown containers margin-bottom: -1rem to offset its
+       default 1rem flex gap; with the gap forced to 0 above, that negative margin made
+       the brand block's last line underlap the nav (hidden behind the active pill on
+       the Overview page). Neutralize it so the brand block keeps its full height. */
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+        margin-bottom: 0 !important;
+    }
     section[data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
         background: #F4F4F6 !important;
         color: #111 !important;
@@ -873,7 +880,12 @@ def _hover_line_chart(
 
     rules = base.mark_rule(color="#bbb").encode().transform_filter(nearest)
 
-    return alt.layer(line, selectors, points, hover_points, rules, text).properties(height=height)
+    # Extra left padding: Vega measures y-axis label widths before the Inter
+    # webfont applies, so wide currency labels (e.g. "$5,000,000") otherwise
+    # get their leading characters clipped at the chart's left edge.
+    return alt.layer(line, selectors, points, hover_points, rules, text).properties(
+        height=height, padding={"left": 16, "top": 5, "right": 5, "bottom": 5}
+    )
 
 
 def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
