@@ -167,9 +167,6 @@ st.markdown(
     h5, [data-testid="stHeading"] h5 { font-size: 17px !important; margin-bottom: 4px !important; }
     h6, [data-testid="stHeading"] h6 { font-size: 14px !important; margin-bottom: 4px !important; }
 
-    /* ---- Institutional palette: display headers near-black (not navy) ---- */
-    h1, h2 { color: #111111 !important; }
-
     /* ---- Reorder Alerts dashboard ---- */
     .kpi-row { padding: 4px 0; }
     .kpi-tile { padding: 6px 0 14px 0; }
@@ -580,28 +577,25 @@ STATUS_COLORS = {
     "on_order":             "#6FA3D4",  # calm blue — outstanding PO is being handled
 }
 
-# Soft pastel palette used across dashboard charts
+# Institutional categorical palette used across dashboard charts
 PASTEL_PALETTE = [
-    "#FFC4A3",  # peach
-    "#A4C8E0",  # light blue
-    "#B5D8B5",  # light green
-    "#F5B9C9",  # soft pink
-    "#D0BDE0",  # light purple
-    "#F2D98D",  # light yellow
-    "#FAB5B5",  # light coral
-    "#C5E0DF",  # light teal
+    "#1F2E45",  # navy
+    "#8A93A2",  # slate
+    "#B08D3E",  # gold
+    "#4A5A75",  # steel
+    "#8C4A4A",  # brick
+    "#6B7A92",  # blue-slate
+    "#C9A96A",  # muted gold
+    "#A3ABB8",  # cool gray
 ]
-PASTEL_PEACH = "#FFB99D"
-PASTEL_BLUE = "#9CC5DF"
-PASTEL_PURPLE = "#D0BDE0"
 
-# Fixed category-to-color map. Keeps Hydrogen Equipment as light blue always.
+# Fixed category-to-color map. Keeps Hydrogen Equipment as navy always.
 # Unknown categories fall back to the rest of PASTEL_PALETTE in deterministic order.
 CATEGORY_COLORS: dict[str, str] = {
-    "Hydrogen Equipment": "#A4C8E0",  # light blue (locked per user request)
-    "Supplement":         "#F5B9C9",  # soft pink
-    "Light Equipment":    "#F2D98D",  # light yellow
-    "Detect Test":        "#B5D8B5",  # light green
+    "Hydrogen Equipment": "#1F2E45",  # navy (locked per user request)
+    "Supplement":         "#8A93A2",  # slate
+    "Light Equipment":    "#B08D3E",  # gold
+    "Detect Test":        "#4A5A75",  # steel
 }
 
 
@@ -1228,11 +1222,11 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
         else:
             y_field = "revenue" if metric == "Revenue" else "units"
             y_format = "$,.0f" if metric == "Revenue" else ",.0f"
-            # Source-aware line color: light purple when Both, otherwise metric-specific
-            if source == "Both":
-                color = PASTEL_PURPLE
+            # Source-aware line color: navy when Both or Revenue, steel for Units-only
+            if source == "Both" or metric == "Revenue":
+                color = _LKI["navy"]
             else:
-                color = PASTEL_PEACH if metric == "Revenue" else PASTEL_BLUE
+                color = "#4A5A75"  # steel
             # X-axis label format based on aggregation
             if gran_label == "month":
                 # Use "Jan 2026" if range spans multiple years, else just "Jan"
