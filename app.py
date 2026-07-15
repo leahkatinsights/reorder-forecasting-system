@@ -186,6 +186,12 @@ st.markdown(
         line-height: 1.12 !important;
         color: #111 !important;
     }
+    /* Display numbers from st.metric match the serif KPI tiles */
+    [data-testid="stMetricValue"] {
+        font-family: 'Source Serif 4', Georgia, serif !important;
+        font-weight: 600 !important;
+        color: #111 !important;
+    }
     h1, [data-testid="stHeading"] h1 { font-size: 48px !important; margin-bottom: 6px !important; }
     h2, [data-testid="stHeading"] h2 { font-size: 36px !important; margin-bottom: 6px !important; }
     h3, [data-testid="stHeading"] h3 { font-size: 24px !important; margin-bottom: 4px !important; }
@@ -748,8 +754,8 @@ def _kpi_card(
             f'text-transform:uppercase;color:#6b6b73;">{secondary_label}</span>'
             f'{sec_corner_html}'
             f'</div>'
-            f'<div style="font-size:{secondary_value_size};font-weight:800;color:#111;'
-            f"font-family:'Inter',sans-serif;letter-spacing:-0.01em;margin-top:2px;"
+            f'<div style="font-size:{secondary_value_size};font-weight:600;color:#111;'
+            f"font-family:'Source Serif 4',Georgia,serif;letter-spacing:-0.01em;margin-top:2px;"
             f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{secondary_value}</div>'
             f'</div>'
         )
@@ -760,8 +766,8 @@ def _kpi_card(
     return (
         f'<div style="background:{bg};border-radius:10px;padding:{padding};min-width:0;">'
         f'{label_row_html}'
-        f'<div style="font-size:{value_size};font-weight:900;color:#111;line-height:1.05;'
-        f"letter-spacing:-0.02em;font-family:'Inter',sans-serif;"
+        f'<div style="font-size:{value_size};font-weight:600;color:#111;line-height:1.05;'
+        f"letter-spacing:-0.01em;font-family:'Source Serif 4',Georgia,serif;"
         f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
         f'<span style="vertical-align:middle;">{value}</span>{delta_html}'
         f'</div>'
@@ -1409,15 +1415,15 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.08em;">On hand</div>
-                        <div style="font-size:22px;font-weight:800;color:#111;line-height:1.2;">{total}</div>
+                        <div style="font-size:22px;font-weight:600;color:#111;line-height:1.2;font-family:'Source Serif 4',Georgia,serif;">{total}</div>
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.08em;">Days left</div>
-                        <div style="font-size:22px;font-weight:800;color:#111;line-height:1.2;">{dos}</div>
+                        <div style="font-size:22px;font-weight:600;color:#111;line-height:1.2;font-family:'Source Serif 4',Georgia,serif;">{dos}</div>
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.08em;">Rec qty</div>
-                        <div style="font-size:22px;font-weight:800;color:#111;line-height:1.2;">{int(r['recommended_qty'])}</div>
+                        <div style="font-size:22px;font-weight:600;color:#111;line-height:1.2;font-family:'Source Serif 4',Georgia,serif;">{int(r['recommended_qty'])}</div>
                     </div>
                 </div>
                 """,
