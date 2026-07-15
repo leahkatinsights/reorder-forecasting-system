@@ -18,6 +18,28 @@ from lib.forecast import calculate_velocity, history_metadata  # noqa: E402
 from lib.reorder import ReorderRecommendation, Settings, compute_recommendation  # noqa: E402
 
 
+# ---------- Altair institutional theme ----------
+_LKI = {
+    "ink": "#111111", "navy": "#1F2E45", "slate": "#8A93A2",
+    "gold": "#B08D3E", "subtle": "#6B7280", "grid": "#E7E9ED",
+}
+
+
+@alt.theme.register("lki_institutional", enable=True)
+def _lki_theme():
+    return alt.theme.ThemeConfig({
+        "config": {
+            "font": "Inter",
+            "range": {"category": [_LKI["navy"], _LKI["slate"], _LKI["gold"],
+                                    "#4A5A75", "#B3BAC5"]},
+            "axis": {"labelColor": _LKI["subtle"], "titleColor": _LKI["subtle"],
+                     "gridColor": _LKI["grid"], "domainColor": _LKI["subtle"]},
+            "legend": {"labelColor": _LKI["subtle"], "titleColor": _LKI["subtle"]},
+            "view": {"stroke": None},
+        }
+    })
+
+
 # ---------- Streamlit config ----------
 # set_page_config MUST be the first Streamlit command; nothing st.* may run before it.
 st.set_page_config(
@@ -53,7 +75,7 @@ st.markdown(
 )
 
 # Override primary button color in the sidebar only (used for active nav item).
-# Keeps the rose primary color for form buttons in the main content area.
+# Keeps the institutional navy primary color for form buttons in the main content area.
 # Also hides the top-right toolbar and tightens top padding on each page.
 st.markdown(
     """
@@ -144,6 +166,9 @@ st.markdown(
     h4, [data-testid="stHeading"] h4 { font-size: 20px !important; margin-bottom: 4px !important; }
     h5, [data-testid="stHeading"] h5 { font-size: 17px !important; margin-bottom: 4px !important; }
     h6, [data-testid="stHeading"] h6 { font-size: 14px !important; margin-bottom: 4px !important; }
+
+    /* ---- Institutional palette: display headers near-black (not navy) ---- */
+    h1, h2 { color: #111111 !important; }
 
     /* ---- Reorder Alerts dashboard ---- */
     .kpi-row { padding: 4px 0; }
