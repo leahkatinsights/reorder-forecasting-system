@@ -1123,8 +1123,8 @@ def render_dashboard(recs: pd.DataFrame, data: dict) -> None:
             hc[0].image(p["image_url"], width=110)
         hc[1].markdown(
             f"""<div style="padding-top:8px;">
-                <div style="font-family:'Inter',sans-serif;font-size:24px;font-weight:900;
-                            letter-spacing:-0.02em;color:#111;line-height:1.1;">{p['name']}</div>
+                <div style="font-family:'Source Serif 4',Georgia,serif;font-size:24px;font-weight:600;
+                            letter-spacing:-0.01em;color:#111;line-height:1.1;">{p['name']}</div>
                 <div style="color:#888;font-size:11px;letter-spacing:1px;text-transform:uppercase;
                             font-family:'SF Mono','Menlo',monospace;margin-top:6px;">SKU&nbsp;·&nbsp;{p['sku']}</div>
             </div>""",
