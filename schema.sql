@@ -1,4 +1,4 @@
--- Lumati Repurchase System · Supabase schema
+-- Reorder Forecasting System · Supabase schema
 -- Run this against any new Supabase project to recreate the database.
 
 create table if not exists vendors (

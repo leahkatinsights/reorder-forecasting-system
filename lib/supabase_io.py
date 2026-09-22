@@ -1,4 +1,4 @@
-"""All Supabase reads and writes for the Lumati Repurchase System."""
+"""All Supabase reads and writes for the Reorder Forecasting System."""
 
 from __future__ import annotations
 

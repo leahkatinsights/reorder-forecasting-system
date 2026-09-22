@@ -1,4 +1,4 @@
-"""Lumati Repurchase System · Streamlit dashboard entrypoint."""
+"""Reorder Forecasting System · Streamlit dashboard entrypoint."""
 
 from __future__ import annotations
 
